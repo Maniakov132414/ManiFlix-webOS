@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, initial-scale=1.0, user-scalable=no" />
+  <title>ManiFlix TV</title>
+  <link rel="stylesheet" href="css/tv.css" />
+  <script src="assets/hls.min.js"></script>
+</head>
+<body>
+  <div id="ambientBackdrop" class="ambient-backdrop"></div>
+
+  <div id="appShell" class="tv-shell">
+    <aside id="sidebar" class="tv-sidebar">
+      <div class="tv-brand">
+        <svg class="brand-logo" viewBox="0 0 512 512" width="42" height="42" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#13192b"/>
+              <stop offset="55%" stop-color="#0b0f1d"/>
+              <stop offset="100%" stop-color="#190d2c"/>
+            </linearGradient>
+            <linearGradient id="rimGrad" x1="36" y1="36" x2="476" y2="476" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#fb7185"/>
+              <stop offset="50%" stop-color="#e11d48"/>
+              <stop offset="100%" stop-color="#9333ea"/>
+            </linearGradient>
+            <linearGradient id="mLeftGrad" x1="108" y1="128" x2="270" y2="388" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#ff4d6d"/>
+              <stop offset="55%" stop-color="#e11d48"/>
+              <stop offset="100%" stop-color="#9333ea"/>
+            </linearGradient>
+            <linearGradient id="playPrism" x1="230" y1="138" x2="408" y2="368" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="70%" stop-color="#ffe4e6"/>
+              <stop offset="100%" stop-color="#f5d0fe"/>
+            </linearGradient>
+          </defs>
+          <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bgGrad)"/>
+          <rect x="22" y="22" width="468" height="468" rx="110" stroke="url(#rimGrad)" stroke-width="12" stroke-opacity="0.9"/>
+          <path d="M112 374V142C112 129.85 126.4 123.4 135.4 131.6L226 214L194 254L158 220V374C158 385.05 149.05 394 138 394H132C120.95 394 112 385.05 112 374Z" fill="url(#mLeftGrad)"/>
+          <path d="M192 222L254 142C262.2 131.4 278.8 134.8 282.2 147.8L302 224L236 286L192 222Z" fill="url(#mLeftGrad)" opacity="0.95"/>
+          <path d="M252 148C252 134.6 267.1 126.8 278.2 134.3L404.6 220.1C414.8 227 414.8 242 404.6 248.9L278.2 334.7C267.1 342.2 252 334.4 252 321V148Z" fill="url(#playPrism)"/>
+          <rect x="252" y="356" width="118" height="36" rx="18" fill="url(#rimGrad)"/>
+        </svg>
+        <div class="tv-brand-meta">
+          <div class="tv-brand-name">ManiFlix</div>
+          <div class="tv-brand-sub">webOS TV</div>
+        </div>
+      </div>
+
+      <nav class="tv-nav" aria-label="Menu chính">
+        <button class="nav-item tv-focus active" data-tab="discover" data-focus-key="nav:discover" tabindex="-1">
+          <svg class="nav-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          <span>Trang chủ</span>
+        </button>
+        <button class="nav-item tv-focus" data-tab="search" data-focus-key="nav:search" tabindex="-1">
+          <svg class="nav-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Tìm kiếm</span>
+        </button>
+        <button class="nav-item tv-focus" data-tab="library" data-focus-key="nav:library" tabindex="-1">
+          <svg class="nav-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+          <span>Tủ phim</span>
+        </button>
+        <button class="nav-item tv-focus" data-tab="monitor" data-focus-key="nav:monitor" tabindex="-1">
+          <svg class="nav-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+          <span>Mạng TV</span>
+        </button>
+        <button class="nav-item tv-focus" data-tab="settings" data-focus-key="nav:settings" tabindex="-1">
+          <svg class="nav-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Cài đặt</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="sidebarUserCard" class="sidebar-user-card tv-focus" data-focus-key="nav:account" tabindex="-1">
+          <div class="su-row">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <div style="min-width:0;text-align:left">
+              <div class="su-title">Khách</div>
+              <div class="su-sub">Đăng nhập đồng bộ</div>
+            </div>
+          </div>
+        </button>
+      </div>
+    </aside>
+
+    <div class="tv-stage">
+      <main id="mainContent" class="main-content"></main>
+
+      <footer id="remoteHintBar" class="remote-hint-bar">
+        <div class="hint-group">
+          <span class="hint-item"><span class="color-dot dot-red"></span><span>Trang chủ</span></span>
+          <span class="hint-item"><span class="color-dot dot-green"></span><span>Tìm kiếm</span></span>
+          <span class="hint-item"><span class="color-dot dot-yellow"></span><span>Tủ phim</span></span>
+          <span class="hint-item"><span class="color-dot dot-blue"></span><span>Kiểm tra mạng TV</span></span>
+        </div>
+        <div class="hint-group">
+          <span class="hint-kbd">D-Pad</span><span>Di chuyển</span>
+          <span class="hint-kbd">OK</span><span>Chọn</span>
+          <span class="hint-kbd">BACK</span><span>Quay lại</span>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <div id="toastBanner" class="toast-banner hidden"></div>
+  <div id="modalRoot"></div>
+  <div id="playerRoot"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+name: Build & Release ManiFlix webOS (.ipk)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipk:
+    name: Package ManiFlix-webOS.ipk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate JS syntax & icons
+        run: |
+          node --check js/app.js
+          python3 -c "
+          import re, pathlib
+          pat = re.compile(r'[\U0001F300-\U0001FAFF\u2600-\u27BF]')
+          for p in ['index.html', 'css/tv.css', 'js/app.js', 'appinfo.json']:
+              txt = pathlib.Path(p).read_text(encoding='utf-8')
+              hits = pat.findall(txt)
+              assert not hits, f'Emoji found in {p}: {hits}'
+          print('VALIDATION_OK')
+          "
+
+      - name: Package .ipk with @webos-tools/cli
+        run: |
+          mkdir -p stage dist
+          cp appinfo.json index.html icon.png largeIcon.png splash.png stage/
+          cp -R assets css js stage/
+          npx --yes -p @webos-tools/cli ares-package stage -o dist --no-minify
+          mv dist/bond.maniakov.maniflix_*.ipk dist/ManiFlix-webOS.ipk
+          ls -lh dist/ManiFlix-webOS.ipk
+          python3 -c "
+          import io, pathlib, tarfile
+          data = pathlib.Path('dist/ManiFlix-webOS.ipk').read_bytes()
+          assert data[:8] == b'!<arch>\n'
+          pos = 8
+          members = {}
+          while pos + 60 <= len(data):
+              hdr = data[pos:pos+60]
+              name = hdr[:16].decode('ascii', 'replace').strip().rstrip('/')
+              size = int(hdr[48:58].decode('ascii').strip())
+              members[name] = data[pos+60:pos+60+size]
+              pos += 60 + size + (size % 2)
+          assert 'debian-binary' in members and 'control.tar.gz' in members and 'data.tar.gz' in members
+          with tarfile.open(fileobj=io.BytesIO(members['data.tar.gz']), mode='r:gz') as tf:
+              names = tf.getnames()
+          for req in ['appinfo.json', 'index.html', 'icon.png', 'largeIcon.png', 'splash.png', 'assets/hls.min.js', 'css/tv.css', 'js/app.js']:
+              assert any(n.endswith('/' + req) or n == req for n in names), f'Missing {req} in {names}'
+          print('IPK_VERIFY_OK', len(data), len(names))
+          "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ManiFlix-webOS-IPK
+          path: dist/ManiFlix-webOS.ipk
+          retention-days: 30
+
+      - name: Publish Release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: ManiFlix webOS TV v1.0.0
+          body: |
+            ## ManiFlix LG webOS Smart TV (`v1.0.0`)
+            - App ID: `bond.maniakov.maniflix` (1920x1080 webOS TV).
+            - Cài đặt trực tiếp qua **webOS Dev Manager** với tệp `ManiFlix-webOS.ipk`.
+            - Hỗ trợ đầy đủ D-Pad, LG Back (`461`), phím Media, phím Màu (`403-406`), Magic Remote, bàn phím ảo TV, trình phát HLS tích hợp TheIntroDB & Cloudflare Edge Speedtest 4 luồng.
+          files: dist/ManiFlix-webOS.ipk
+          overwrite_files: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
