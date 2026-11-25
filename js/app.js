@@ -124,6 +124,7 @@
       bg: '#0b0f19',
       surface: '#151b2b',
       ambient: true,
+      ultraSmooth: true,
       autoCutAds: true,
       introSkip: 'button',
       autoNext: true
@@ -204,6 +205,7 @@
     root.setProperty('--sidebar-bg', pal.isLight ? 'rgba(242,243,247,0.95)' : 'rgba(13,18,30,0.94)');
     const amb = document.getElementById('ambientBackdrop');
     if (amb) amb.style.display = state.prefs.ambient ? 'block' : 'none';
+    document.body.classList.toggle('ultra-smooth', state.prefs.ultraSmooth !== false);
   }
 
   function savePrefs() {
@@ -261,9 +263,8 @@
     return res.json();
   }
 
-  function setAmbientUrl(imgUrl) {
-    const el = document.getElementById('ambientBackdrop');
-    if (el && imgUrl) el.style.backgroundImage = 'url("' + imgUrl + '")';
+  function setAmbientUrl() {
+    // Pure CSS radial-gradient backdrop uses zero-blur GPU tinting without bitmap compositing
   }
 
   function isBlocked(slug) {
@@ -365,8 +366,10 @@
   async function loadMoreDiscover() {
     if (state.loadingMore) return;
     state.loadingMore = true;
-    render();
+    const moreBtn = document.getElementById('btnLoadMore');
+    if (moreBtn) moreBtn.textContent = 'Đang tải...';
     try {
+      let added = [];
       if (state.category === 'all') {
         const nextPage = state.discoverPage + 1;
         const r = await api('/api/movies?page=' + nextPage);
@@ -374,7 +377,10 @@
         if (items.length) {
           const seen = new Set(state.heroMovies.map((x) => x.slug));
           for (let i = 0; i < items.length; i++) {
-            if (!seen.has(items[i].slug)) state.heroMovies.push(items[i]);
+            if (!seen.has(items[i].slug)) {
+              state.heroMovies.push(items[i]);
+              if (!isBlocked(items[i].slug)) added.push(items[i]);
+            }
           }
           state.discoverPage = nextPage;
         } else {
@@ -390,18 +396,27 @@
         if (items.length) {
           const seen = new Set(state.filteredMovies.map((x) => x.slug));
           for (let i = 0; i < items.length; i++) {
-            if (!seen.has(items[i].slug)) state.filteredMovies.push(items[i]);
+            if (!seen.has(items[i].slug)) {
+              state.filteredMovies.push(items[i]);
+              if (!isBlocked(items[i].slug)) added.push(items[i]);
+            }
           }
           state.categoryPage = nextPage;
         } else {
           toast('Đã tải hết danh sách phim');
         }
       }
+      const grid = document.getElementById('discoverGrid');
+      if (grid && added.length) {
+        const prefix = state.category === 'all' ? 'latest' : 'catgrid';
+        grid.insertAdjacentHTML('beforeend', added.map((m) => movieCardHtml(m, prefix)).join(''));
+      }
     } catch (e) {
       toast('Lỗi tải thêm phim');
     } finally {
       state.loadingMore = false;
-      render();
+      const btn = document.getElementById('btnLoadMore');
+      if (btn) btn.textContent = 'Tải thêm phim';
     }
   }
 
@@ -457,7 +472,7 @@
     const fk = (focusPrefix || 'card') + ':' + m.slug;
     return '<button class="movie-card tv-focus" data-slug="' + esc(m.slug) + '" data-focus-key="' + esc(fk) + '" tabindex="-1">' +
       '<div class="poster-wrap">' +
-        '<img loading="lazy" src="' + esc(primary) + '" data-fallback="' + esc(secondary) + '" alt="' + esc(m.name) + '" />' +
+        '<img width="210" height="315" decoding="async" loading="lazy" src="' + esc(primary) + '" data-fallback="' + esc(secondary) + '" alt="' + esc(m.name) + '" />' +
         (badge ? '<span class="poster-badge">' + esc(badge) + '</span>' : '') +
       '</div>' +
       '<div class="movie-name">' + esc(m.name) + '</div>' +
@@ -465,11 +480,49 @@
     '</button>';
   }
 
+  function updateHeroInPlace() {
+    const heroEl = document.getElementById('heroCard');
+    if (!heroEl) return;
+    const visibleHero = state.heroMovies.filter((m) => !isBlocked(m.slug));
+    const featured = visibleHero.slice(0, 6);
+    const hero = featured[state.heroIdx] || featured[0];
+    if (!hero) return;
+
+    const bg = resolveImg(hero.thumb_url || hero.poster_url) || IMG_FALLBACK_SVG;
+    const bgFb = resolveImg(hero.poster_url) || '';
+    const imgEl = heroEl.querySelector('.hero-bg');
+    if (imgEl) {
+      imgEl.removeAttribute('data-fb-step');
+      imgEl.setAttribute('data-fallback', bgFb);
+      imgEl.src = bg;
+    }
+    const tagEl = heroEl.querySelector('.hero-tag');
+    if (tagEl) tagEl.textContent = 'PHIM MỚI / ' + (hero.quality || 'HD');
+    const titleEl = heroEl.querySelector('.hero-title');
+    if (titleEl) titleEl.textContent = hero.name || '';
+    const subEl = heroEl.querySelector('.hero-sub');
+    if (subEl) subEl.textContent = (hero.origin_name || '') + (hero.year ? ' (' + hero.year + ')' : '');
+
+    const playBtn = heroEl.querySelector('[data-play-direct]');
+    if (playBtn) playBtn.setAttribute('data-play-direct', hero.slug);
+    const detBtn = heroEl.querySelector('[data-open-slug]');
+    if (detBtn) detBtn.setAttribute('data-open-slug', hero.slug);
+    const favBtn = heroEl.querySelector('[data-fav-slug]');
+    if (favBtn) {
+      favBtn.setAttribute('data-fav-slug', hero.slug);
+      const favActive = isFavorite(hero.slug);
+      favBtn.innerHTML = svgIcon(favActive ? 'check' : 'plus', 18) + '<span>' + (favActive ? 'Đã lưu' : 'Tủ phim') + '</span>';
+    }
+    document.querySelectorAll('.hero-dot').forEach((dot) => {
+      const idx = parseInt(dot.getAttribute('data-hero-idx'), 10);
+      dot.classList.toggle('active', idx === state.heroIdx);
+    });
+  }
+
   function renderDiscover() {
     const visibleHero = state.heroMovies.filter((m) => !isBlocked(m.slug));
     const featured = visibleHero.slice(0, 6);
     const hero = featured[state.heroIdx] || featured[0];
-    if (hero) setAmbientUrl(resolveImg(hero.poster_url || hero.thumb_url));
 
     let html = '<div class="chips-row">';
     for (let i = 0; i < CATEGORIES.length; i++) {
@@ -483,8 +536,8 @@
         const bg = resolveImg(hero.thumb_url || hero.poster_url) || IMG_FALLBACK_SVG;
         const bgFb = resolveImg(hero.poster_url) || '';
         const favActive = isFavorite(hero.slug);
-        html += '<div class="hero-card">' +
-          '<img class="hero-bg" src="' + esc(bg) + '" data-fallback="' + esc(bgFb) + '" alt="" />' +
+        html += '<div id="heroCard" class="hero-card">' +
+          '<img class="hero-bg" decoding="async" src="' + esc(bg) + '" data-fallback="' + esc(bgFb) + '" alt="" />' +
           '<div class="hero-grad"></div>' +
           '<div class="hero-body">' +
             '<span class="hero-tag">PHIM MỚI / ' + esc(hero.quality || 'HD') + '</span>' +
@@ -512,7 +565,7 @@
           const pct = h.duration > 1 ? Math.min(100, Math.round((h.currentTime || 0) / h.duration * 100)) : 0;
           html += '<button class="movie-card tv-focus" data-slug="' + esc(h.slug) + '" data-focus-key="hist:' + esc(h.slug) + '" tabindex="-1">' +
             '<div class="poster-wrap">' +
-              '<img src="' + esc(resolveImg(h.poster) || IMG_FALLBACK_SVG) + '" alt="" />' +
+              '<img width="210" height="315" decoding="async" loading="lazy" src="' + esc(resolveImg(h.poster) || IMG_FALLBACK_SVG) + '" alt="" />' +
               '<span class="poster-badge">' + esc(h.episodeName || 'Tập 1') + '</span>' +
             '</div>' +
             '<div class="movie-name">' + esc(h.name || h.slug) + '</div>' +
@@ -535,7 +588,7 @@
         html += '<div class="section-hdr"><h3 class="section-title">' + title + '</h3></div><div class="rail">' + vis.map((m) => movieCardHtml(m, prefix)).join('') + '</div>';
       }
 
-      html += '<div class="section-hdr"><h3 class="section-title">Mới cập nhật</h3></div><div class="movie-grid">' + visibleHero.map((m) => movieCardHtml(m, 'latest')).join('') + '</div>';
+      html += '<div class="section-hdr"><h3 class="section-title">Mới cập nhật</h3></div><div id="discoverGrid" class="movie-grid">' + visibleHero.map((m) => movieCardHtml(m, 'latest')).join('') + '</div>';
       html += '<div class="load-more-wrap"><button id="btnLoadMore" class="btn-glass tv-focus" data-focus-key="discover:more" tabindex="-1">' + (state.loadingMore ? 'Đang tải...' : 'Tải thêm phim') + '</button></div>';
     } else {
       const catObj = CATEGORIES.find((c) => c.id === state.category);
@@ -543,7 +596,7 @@
       const list = state.filteredMovies.filter((m) => !isBlocked(m.slug));
       html += '<div class="section-hdr"><h3 class="section-title">' + esc(catLabel) + '</h3></div>';
       if (list.length) {
-        html += '<div class="movie-grid">' + list.map((m) => movieCardHtml(m, 'catgrid')).join('') + '</div>';
+        html += '<div id="discoverGrid" class="movie-grid">' + list.map((m) => movieCardHtml(m, 'catgrid')).join('') + '</div>';
         html += '<div class="load-more-wrap"><button id="btnLoadMore" class="btn-glass tv-focus" data-focus-key="discover:more" tabindex="-1">' + (state.loadingMore ? 'Đang tải...' : 'Tải thêm phim') + '</button></div>';
       } else {
         html += '<div class="glass-box">Đang tải danh sách phim...</div>';
@@ -849,7 +902,7 @@
           '<div class="spec-kv"><span>Nền tảng</span><strong>' + (hasWebOS ? 'LG webOS TV' : 'Trình duyệt TV') + '</strong></div>' +
           '<div class="spec-kv"><span>Độ phân giải giao diện</span><strong>' + esc(tvRes) + '</strong></div>' +
           '<div class="spec-kv"><span>Trình phát HLS</span><strong>' + (window.Hls && window.Hls.isSupported() ? 'HLS.js + MSE' : 'Native Video HLS') + '</strong></div>' +
-          '<div class="spec-kv"><span>Phiên bản App</span><strong>ManiFlix v1.0.0</strong></div>' +
+          '<div class="spec-kv"><span>Phiên bản App</span><strong>ManiFlix v1.1.0</strong></div>' +
         '</div>' +
         '<div class="glass-box">' +
           '<div style="font-weight:800;font-size:18px;margin-bottom:10px">Máy chủ phim.maniakov.bond</div>' +
@@ -1070,7 +1123,7 @@
       '<div class="settings-section">' +
         '<div class="settings-label">Ứng dụng</div>' +
         '<div class="settings-card">' +
-          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.0.0 (bond.maniakov.maniflix)</span></div>' +
+          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.1.0 (bond.maniakov.maniflix)</span></div>' +
           '<button class="s-row tv-focus" id="btnResetPrefs" data-focus-key="set:reset" tabindex="-1">' +
             '<span style="color:#ff453a;font-weight:700">Đặt lại cài đặt mặc định</span>' +
           '</button>' +
@@ -1111,8 +1164,12 @@
             ACCENT_PRESETS.map((a) => '<button class="swatch tv-focus ' + (state.prefs.accent.toLowerCase() === a.hex.toLowerCase() ? 'active' : '') + '" style="background:' + a.hex + '" data-accent="' + a.hex + '" data-focus-key="accent:' + a.id + '" tabindex="-1" title="' + a.name + '"></button>').join('') +
           '</div>' +
         '</div>' +
+        '<button class="s-row tv-focus" id="btnToggleUltraSmooth" data-focus-key="theme:ultrasmooth" tabindex="-1">' +
+          '<div><div>Chế độ Siêu Mượt TV</div><div class="s-sub">Tối ưu 60fps trên TV GPU, tắt đổ bóng nặng khi cuộn</div></div>' +
+          '<span class="pill-toggle ' + (state.prefs.ultraSmooth !== false ? 'on' : '') + '">' + (state.prefs.ultraSmooth !== false ? 'BẬT' : 'TẮT') + '</span>' +
+        '</button>' +
         '<button class="s-row tv-focus" id="btnToggleAmbient" data-focus-key="theme:ambient" tabindex="-1">' +
-          '<span>Ánh nền theo poster phim</span>' +
+          '<span>Ánh nền theo màu chủ đạo</span>' +
           '<span class="pill-toggle ' + (state.prefs.ambient ? 'on' : '') + '">' + (state.prefs.ambient ? 'BẬT' : 'TẮT') + '</span>' +
         '</button>' +
         (state.user ? '<button class="s-row tv-focus" id="btnSyncTheme" data-focus-key="theme:sync" tabindex="-1"><span style="display:inline-flex;align-items:center;color:var(--accent);font-weight:700">' + svgIcon('cloudUp', 18) + '<span style="margin-left:8px">Đồng bộ giao diện lên tài khoản</span></span></button>' : '') +
@@ -1296,7 +1353,12 @@
       updateQualityButton();
 
       if (window.Hls && window.Hls.isSupported()) {
-        hls = new window.Hls({ enableWorker: true, maxBufferLength: 30 });
+        hls = new window.Hls({
+          enableWorker: true,
+          maxBufferLength: 24,
+          maxMaxBufferLength: 45,
+          backBufferLength: 10
+        });
         hls.loadSource(srcUrl);
         hls.attachMedia(video);
         hls.on(window.Hls.Events.MANIFEST_PARSED, (_, data) => {
@@ -1672,30 +1734,29 @@
 
   function bindDynamicEvents() {
     const mc = document.getElementById('mainContent');
-    mc.querySelectorAll('[data-slug]').forEach((el) => {
-      el.onclick = () => openDetail(el.dataset.slug);
-    });
-    mc.querySelectorAll('[data-open-slug]').forEach((el) => {
-      el.onclick = () => openDetail(el.dataset.openSlug);
-    });
-    mc.querySelectorAll('[data-play-direct]').forEach((el) => {
-      el.onclick = () => playMovieDirect(el.dataset.playDirect);
-    });
+    mc.onclick = (e) => {
+      const slugBtn = e.target && e.target.closest ? e.target.closest('[data-slug]') : null;
+      if (slugBtn) { openDetail(slugBtn.dataset.slug); return; }
+      const openBtn = e.target && e.target.closest ? e.target.closest('[data-open-slug]') : null;
+      if (openBtn) { openDetail(openBtn.dataset.openSlug); return; }
+      const playDirectBtn = e.target && e.target.closest ? e.target.closest('[data-play-direct]') : null;
+      if (playDirectBtn) { playMovieDirect(playDirectBtn.dataset.playDirect); return; }
+    };
     mc.querySelectorAll('[data-cat]').forEach((el) => {
       el.onclick = () => selectCategory(el.dataset.cat);
     });
     mc.querySelectorAll('[data-hero-idx]').forEach((el) => {
-      el.onclick = () => { state.heroIdx = parseInt(el.dataset.heroIdx, 10) || 0; render(); };
+      el.onclick = () => { state.heroIdx = parseInt(el.dataset.heroIdx, 10) || 0; updateHeroInPlace(); };
     });
     const hPrev = document.getElementById('btnHeroPrev');
     if (hPrev) hPrev.onclick = () => {
       const len = Math.min(6, state.heroMovies.filter((m) => !isBlocked(m.slug)).length);
-      if (len) { state.heroIdx = (state.heroIdx - 1 + len) % len; render(); }
+      if (len) { state.heroIdx = (state.heroIdx - 1 + len) % len; updateHeroInPlace(); }
     };
     const hNext = document.getElementById('btnHeroNext');
     if (hNext) hNext.onclick = () => {
       const len = Math.min(6, state.heroMovies.filter((m) => !isBlocked(m.slug)).length);
-      if (len) { state.heroIdx = (state.heroIdx + 1) % len; render(); }
+      if (len) { state.heroIdx = (state.heroIdx + 1) % len; updateHeroInPlace(); }
     };
     const btnMore = document.getElementById('btnLoadMore');
     if (btnMore) btnMore.onclick = loadMoreDiscover;
@@ -1703,7 +1764,8 @@
     mc.querySelectorAll('[data-fav-slug]').forEach((el) => {
       el.onclick = async () => {
         if (!state.token) { openAuthModal(); return; }
-        const m = state.heroMovies.find((x) => x.slug === el.dataset.favSlug);
+        const slug = el.getAttribute('data-fav-slug');
+        const m = state.heroMovies.find((x) => x.slug === slug);
         if (!m) return;
         try {
           const r = await api('/api/user/favorites/toggle', {
@@ -1711,7 +1773,9 @@
             json: { slug: m.slug, name: m.name, poster: m.poster_url || m.thumb_url || '', year: m.year || 0, quality: m.quality || 'HD', lang: m.lang || 'Vietsub' }
           });
           if (Array.isArray(r.favorites)) state.favorites = r.favorites;
-          render();
+          const favActive = isFavorite(m.slug);
+          el.innerHTML = svgIcon(favActive ? 'check' : 'plus', 18) + '<span>' + (favActive ? 'Đã lưu' : 'Tủ phim') + '</span>';
+          toast(favActive ? 'Đã lưu vào tủ phim' : 'Đã xoá khỏi tủ phim');
         } catch (e) {}
       };
     });
@@ -1747,7 +1811,9 @@
         json: { slug: m.slug, name: m.name, poster: m.poster_url || m.thumb_url || '', year: m.year || 0, quality: m.quality || 'HD', lang: m.lang || 'Vietsub' }
       });
       if (Array.isArray(r.favorites)) state.favorites = r.favorites;
-      render();
+      const favActive = isFavorite(m.slug);
+      dFav.innerHTML = svgIcon(favActive ? 'check' : 'bookmark', 18) + '<span>' + (favActive ? 'Đã lưu' : 'Lưu') + '</span>';
+      toast(favActive ? 'Đã lưu vào tủ phim' : 'Đã xoá khỏi tủ phim');
     };
     const dBlock = document.getElementById('btnDetailBlock');
     if (dBlock) dBlock.onclick = () => {
@@ -1840,7 +1906,7 @@
     if (btnNext) btnNext.onclick = () => { state.prefs.autoNext = !state.prefs.autoNext; savePrefs(); render(); };
     const btnReset = document.getElementById('btnResetPrefs');
     if (btnReset) btnReset.onclick = () => {
-      state.prefs = { themeMode: 'dark', presetId: 'webos-midnight', accent: '#FA2D48', bg: '#0b0f19', surface: '#151b2b', ambient: true, autoCutAds: true, introSkip: 'button', autoNext: true };
+      state.prefs = { themeMode: 'dark', presetId: 'webos-midnight', accent: '#FA2D48', bg: '#0b0f19', surface: '#151b2b', ambient: true, ultraSmooth: true, autoCutAds: true, introSkip: 'button', autoNext: true };
       savePrefs();
       toast('Đã đặt lại mặc định');
       render();
@@ -1865,6 +1931,8 @@
     mc.querySelectorAll('[data-accent]').forEach((el) => {
       el.onclick = () => { state.prefs.accent = el.dataset.accent; savePrefs(); render(); };
     });
+    const btnUltra = document.getElementById('btnToggleUltraSmooth');
+    if (btnUltra) btnUltra.onclick = () => { state.prefs.ultraSmooth = !(state.prefs.ultraSmooth !== false); savePrefs(); render(); };
     const btnAmb = document.getElementById('btnToggleAmbient');
     if (btnAmb) btnAmb.onclick = () => { state.prefs.ambient = !state.prefs.ambient; savePrefs(); render(); };
     const btnSyncTheme = document.getElementById('btnSyncTheme');
@@ -1968,28 +2036,39 @@
     return out;
   }
 
+  function getRelativeOffsetTop(el, root) {
+    let top = 0;
+    let node = el;
+    while (node && node !== root) {
+      top += node.offsetTop;
+      node = node.offsetParent;
+    }
+    return top;
+  }
+
   function focusElement(el) {
     if (!el) return false;
     el.focus({ preventScroll: true });
     if (el.dataset && el.dataset.focusKey) {
       state.lastFocusKey = el.dataset.focusKey;
     }
-    // Smooth horizontal centering for rails/chips & vertical scroll for mainContent
+    // Zero-reflow horizontal centering for rails/chips using offsetLeft
     const rail = el.closest('.rail, .chips-row');
     if (rail) {
-      const elRect = el.getBoundingClientRect();
-      const railRect = rail.getBoundingClientRect();
-      const offset = (elRect.left - railRect.left) - (railRect.width / 2 - elRect.width / 2);
-      rail.scrollLeft += offset;
+      const targetLeft = Math.max(0, el.offsetLeft - (rail.clientWidth - el.offsetWidth) / 2);
+      rail.scrollLeft = targetLeft;
     }
+    // Zero-reflow vertical scroll for mainContent / drawer using accumulated offsetTop
     const mc = el.closest('#mainContent, .player-drawer-body');
     if (mc) {
-      const elRect = el.getBoundingClientRect();
-      const mcRect = mc.getBoundingClientRect();
-      if (elRect.top < mcRect.top + 36) {
-        mc.scrollTop -= (mcRect.top + 36 - elRect.top);
-      } else if (elRect.bottom > mcRect.bottom - 36) {
-        mc.scrollTop += (elRect.bottom - (mcRect.bottom - 36));
+      const relTop = getRelativeOffsetTop(el, mc);
+      const viewTop = mc.scrollTop;
+      const viewBottom = viewTop + mc.clientHeight;
+      const elBottom = relTop + el.offsetHeight;
+      if (relTop < viewTop + 36) {
+        mc.scrollTop = Math.max(0, relTop - 36);
+      } else if (elBottom > viewBottom - 36) {
+        mc.scrollTop = elBottom - mc.clientHeight + 36;
       }
     }
     return true;
@@ -2014,38 +2093,117 @@
     return items.length ? focusElement(items[0]) : false;
   }
 
+  function jumpToActiveSidebar() {
+    const activeNav = document.querySelector('#sidebar .nav-item.active') || document.querySelector('#sidebar .nav-item');
+    return activeNav ? focusElement(activeNav) : false;
+  }
+
+  function getGridCols(gridEl, items) {
+    if (gridEl.classList.contains('movie-grid')) return 6;
+    if (!items.length) return 1;
+    const firstTop = items[0].offsetTop;
+    let cols = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].offsetTop === firstTop) cols++;
+      else break;
+    }
+    return Math.max(1, cols);
+  }
+
   function moveFocusSpatial(dir) {
     const container = getFocusContainer();
     const list = getFocusables(container);
     if (!list.length) return;
 
-    let cur = document.activeElement;
+    const cur = document.activeElement;
     if (!cur || list.indexOf(cur) === -1) {
       focusElement(list[0]);
       return;
     }
 
-    // Sidebar <-> Main shortcuts
     const inSidebar = Boolean(cur.closest('#sidebar'));
     const inMain = Boolean(cur.closest('#mainContent'));
 
-    if (inSidebar && dir === 'right') {
-      const mainList = getFocusables(document.getElementById('mainContent'));
-      if (mainList.length) {
-        const curRect = cur.getBoundingClientRect();
-        let best = mainList[0];
-        let bestDist = Infinity;
-        for (let i = 0; i < mainList.length; i++) {
-          const r = mainList[i].getBoundingClientRect();
-          const d = Math.abs((r.top + r.height / 2) - (curRect.top + curRect.height / 2)) * 2 + r.left;
-          if (d < bestDist) { bestDist = d; best = mainList[i]; }
+    // O(1) indexed navigation for Sidebar vertical stack
+    if (inSidebar) {
+      if (dir === 'up' || dir === 'down') {
+        const navItems = getFocusables(document.getElementById('sidebar'));
+        const idx = navItems.indexOf(cur);
+        if (idx !== -1) {
+          if (dir === 'up' && idx > 0) { focusElement(navItems[idx - 1]); return; }
+          if (dir === 'down' && idx + 1 < navItems.length) { focusElement(navItems[idx + 1]); return; }
         }
-        focusElement(best);
         return;
+      }
+      if (dir === 'right') {
+        const mainList = getFocusables(document.getElementById('mainContent'));
+        if (mainList.length) {
+          const curRect = cur.getBoundingClientRect();
+          let best = mainList[0];
+          let bestDist = Infinity;
+          for (let i = 0; i < mainList.length; i++) {
+            const r = mainList[i].getBoundingClientRect();
+            const d = Math.abs((r.top + r.height / 2) - (curRect.top + curRect.height / 2)) * 2 + r.left;
+            if (d < bestDist) { bestDist = d; best = mainList[i]; }
+          }
+          focusElement(best);
+          return;
+        }
       }
     }
 
-    const cr = cur.getBoundingClientRect();
+    // O(1) indexed navigation inside horizontal rows
+    const hRow = cur.closest('.rail, .chips-row, .kbd-row, .detail-actions, .player-btn-group, .swatch-row, .hero-actions, .hero-nav-row');
+    if (hRow && (dir === 'left' || dir === 'right')) {
+      const rowItems = getFocusables(hRow);
+      const idx = rowItems.indexOf(cur);
+      if (idx !== -1) {
+        if (dir === 'left') {
+          if (idx > 0) { focusElement(rowItems[idx - 1]); return; }
+          if (inMain) { jumpToActiveSidebar(); return; }
+        } else if (dir === 'right') {
+          if (idx + 1 < rowItems.length) { focusElement(rowItems[idx + 1]); return; }
+        }
+      }
+    }
+
+    // O(1) indexed navigation inside grids (.movie-grid, .ep-grid)
+    const grid = cur.closest('.movie-grid, .ep-grid');
+    if (grid) {
+      const gridItems = getFocusables(grid);
+      const idx = gridItems.indexOf(cur);
+      if (idx !== -1) {
+        const cols = getGridCols(grid, gridItems);
+        const col = idx % cols;
+        if (dir === 'left') {
+          if (col > 0) { focusElement(gridItems[idx - 1]); return; }
+          if (inMain) { jumpToActiveSidebar(); return; }
+        } else if (dir === 'right') {
+          if (col + 1 < cols && idx + 1 < gridItems.length) { focusElement(gridItems[idx + 1]); return; }
+        } else if (dir === 'up') {
+          if (idx - cols >= 0) { focusElement(gridItems[idx - cols]); return; }
+        } else if (dir === 'down') {
+          if (idx + cols < gridItems.length) { focusElement(gridItems[idx + cols]); return; }
+        }
+      }
+    }
+
+    // O(1) indexed navigation inside .settings-card vertical stack
+    const sCard = cur.closest('.settings-card');
+    if (sCard && (dir === 'up' || dir === 'down')) {
+      const cardItems = getFocusables(sCard);
+      const idx = cardItems.indexOf(cur);
+      if (idx !== -1) {
+        if (dir === 'up' && idx > 0) { focusElement(cardItems[idx - 1]); return; }
+        if (dir === 'down' && idx + 1 < cardItems.length) { focusElement(cardItems[idx + 1]); return; }
+      }
+    }
+
+    // Fallback 2D spatial scan ONLY when crossing sections (cached rects in single pass)
+    const rects = new Array(list.length);
+    for (let i = 0; i < list.length; i++) rects[i] = list[i].getBoundingClientRect();
+    const curIdx = list.indexOf(cur);
+    const cr = rects[curIdx];
     const cx = cr.left + cr.width / 2;
     const cy = cr.top + cr.height / 2;
 
@@ -2053,9 +2211,8 @@
     let bestScore = Infinity;
 
     for (let i = 0; i < list.length; i++) {
-      const el = list[i];
-      if (el === cur) continue;
-      const r = el.getBoundingClientRect();
+      if (i === curIdx) continue;
+      const r = rects[i];
       const tx = r.left + r.width / 2;
       const ty = r.top + r.height / 2;
       const dx = tx - cx;
@@ -2091,32 +2248,57 @@
       const score = primary + penalty;
       if (score < bestScore) {
         bestScore = score;
-        bestEl = el;
+        bestEl = list[i];
       }
     }
 
     if (bestEl) {
       focusElement(bestEl);
     } else if (inMain && dir === 'left') {
-      const activeNav = document.querySelector('#sidebar .nav-item.active') || document.querySelector('#sidebar .nav-item');
-      if (activeNav) focusElement(activeNav);
+      jumpToActiveSidebar();
     }
   }
 
-  /* Magic Remote Pointer Sync */
-  document.addEventListener('mouseover', (e) => {
+  /* Magic Remote Pointer Sync (delta > 10px prevents cursor fighting D-Pad) */
+  let lastMouseX = -1;
+  let lastMouseY = -1;
+  document.addEventListener('mousemove', (e) => {
+    if (lastMouseX < 0) {
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      return;
+    }
+    const dx = Math.abs(e.clientX - lastMouseX);
+    const dy = Math.abs(e.clientY - lastMouseY);
+    if (dx <= 10 && dy <= 10) return;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    document.body.classList.remove('dpad-mode');
     const t = e.target && e.target.closest ? e.target.closest('.tv-focus') : null;
     if (t && !t.disabled) {
       t.focus({ preventScroll: true });
       if (t.dataset && t.dataset.focusKey) state.lastFocusKey = t.dataset.focusKey;
     }
-  });
+  }, { passive: true });
 
   /* Full LG webOS Remote + Keyboard Engine */
+  let lastDpadTs = 0;
   document.addEventListener('keydown', (e) => {
     const code = e.keyCode || e.which;
     const active = document.activeElement;
     const isInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+
+    if (code === 37 || code === 38 || code === 39 || code === 40) {
+      const now = performance.now();
+      if (e.repeat && now - lastDpadTs < 75) {
+        e.preventDefault();
+        return;
+      }
+      lastDpadTs = now;
+      document.body.classList.add('dpad-mode');
+    } else if (code === 13 || code === 461 || (code >= 403 && code <= 417)) {
+      document.body.classList.add('dpad-mode');
+    }
 
     // LG Color Keys
     if (code === 403) { e.preventDefault(); switchTab('discover'); return; }
@@ -2205,7 +2387,7 @@
   });
   document.getElementById('sidebarUserCard').onclick = openAuthModal;
 
-  // Auto-rotate hero banner every 8s when on Discover home and near top
+  // Auto-rotate hero banner in-place every 8s when on Discover home and near top
   setInterval(() => {
     const mc = document.getElementById('mainContent');
     if (mc && mc.scrollTop < 220 && state.tab === 'discover' && state.category === 'all' && !state.detailSlug && !state.player && !document.getElementById('modalRoot').innerHTML) {
@@ -2214,7 +2396,7 @@
         const active = document.activeElement;
         if (!active || !active.closest('.hero-card, .hero-nav-row')) {
           state.heroIdx = (state.heroIdx + 1) % len;
-          render();
+          updateHeroInPlace();
         }
       }
     }
