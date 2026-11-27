@@ -1204,7 +1204,7 @@
       '<div class="settings-section">' +
         '<div class="settings-label">Ứng dụng</div>' +
         '<div class="settings-card">' +
-          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.2.1 (bond.maniakov.maniflix)</span></div>' +
+          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">2.0.0 (bond.maniakov.maniflix)</span></div>' +
           '<button class="s-row tv-focus" id="btnResetPrefs" data-focus-key="set:reset" tabindex="-1">' +
             '<span style="color:#ff453a;font-weight:700">Đặt lại cài đặt mặc định</span>' +
           '</button>' +
@@ -1437,6 +1437,7 @@
       if (window.Hls && window.Hls.isSupported()) {
         hls = new window.Hls({
           enableWorker: true,
+          startFragPrefetch: true,
           subtitleDisplay: true,
           maxBufferLength: 24,
           maxMaxBufferLength: 45,
