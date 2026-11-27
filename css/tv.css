@@ -60,9 +60,10 @@ html, body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: var(--sidebar-bg);
-  border: 1px solid var(--card-stroke);
-  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(16, 22, 38, 0.90) 0%, rgba(10, 14, 25, 0.94) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  border-radius: 26px;
   padding: 22px 16px;
   margin-right: 28px;
 }
@@ -312,7 +313,8 @@ body:not(.dpad-mode) .movie-card.tv-focus:hover .poster-wrap {
   position: relative;
   border-radius: 22px;
   overflow: hidden;
-  border: 1px solid var(--card-stroke);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   height: 410px;
   margin: 4px 4px 12px;
   background: var(--surface);
@@ -396,8 +398,9 @@ body:not(.dpad-mode) .movie-card.tv-focus:hover .poster-wrap {
 
 .btn-accent {
   border: 2px solid var(--accent);
-  border-radius: 14px;
+  border-radius: 999px;
   background: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28);
   color: #ffffff;
   padding: 13px 26px;
   font-size: 18px;
@@ -407,8 +410,9 @@ body:not(.dpad-mode) .movie-card.tv-focus:hover .poster-wrap {
 
 .btn-glass {
   border: 2px solid rgba(255, 255, 255, 0.25);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
   color: #ffffff;
   padding: 13px 22px;
   font-size: 17px;
