@@ -6,12 +6,12 @@
   const CF_UP = 'https://speed.cloudflare.com/__up';
 
   const THEME_PRESETS = [
-    { id: 'webos-midnight', name: 'ManiFlix TV Tối', mode: 'dark', accent: '#FA2D48', bg: '#0b0f19', surface: '#151b2b' },
-    { id: 'oled-black', name: 'OLED Đen Tuyền', mode: 'oled', accent: '#FA2D48', bg: '#000000', surface: '#121216' },
-    { id: 'midnight-indigo', name: 'Midnight Indigo', mode: 'custom', accent: '#5E5CE6', bg: '#0B1020', surface: '#151C32' },
-    { id: 'forest-emerald', name: 'Forest Emerald', mode: 'custom', accent: '#30D158', bg: '#0B1612', surface: '#14241D' },
-    { id: 'cyberpunk-rose', name: 'Cyberpunk Rose', mode: 'custom', accent: '#FF2D55', bg: '#16091A', surface: '#26112E' },
-    { id: 'pure-light', name: 'Sáng TV', mode: 'light', accent: '#FA2D48', bg: '#F2F3F7', surface: '#FFFFFF' }
+    { id: 'crimson_violet', name: 'ManiFlix Mặc Định', mode: 'dark', accent: '#e11d48', bg: '#0b0f19', surface: '#0f172a' },
+    { id: 'netflix_oled', name: 'Rạp Đen OLED', mode: 'oled', accent: '#e50914', bg: '#050507', surface: '#0d0d12' },
+    { id: 'midnight_indigo', name: 'Đêm Xanh Indigo', mode: 'custom', accent: '#5e5ce6', bg: '#0b1020', surface: '#151c32' },
+    { id: 'emerald_aurora', name: 'Lục Bảo Cực Quang', mode: 'custom', accent: '#10b981', bg: '#06120f', surface: '#0b1d19' },
+    { id: 'cyber_rose', name: 'Cyberpunk Rose', mode: 'custom', accent: '#ff2d55', bg: '#140818', surface: '#221029' },
+    { id: 'pure_light', name: 'Trắng Tinh Khôi', mode: 'light', accent: '#e11d48', bg: '#f4f5f8', surface: '#ffffff' }
   ];
 
   const ACCENT_PRESETS = [
@@ -127,7 +127,10 @@
       ultraSmooth: true,
       autoCutAds: true,
       introSkip: 'button',
-      autoNext: true
+      autoNext: true,
+      uiLang: 'vi',
+      defaultSubLang: 'vi',
+      langOnboarded: false
     }, safeJsonParse(localStorage.getItem('mf.prefs'), {})),
     monitor: {
       testing: false,
@@ -464,6 +467,70 @@
     }
   }
 
+  function tr(vi, en) {
+    return state.prefs.uiLang === 'en' ? en : vi;
+  }
+
+  function formatSubBadge(m) {
+    const subs = Array.isArray(m && m.sub_langs) ? m.sub_langs : [];
+    const ui = state.prefs.uiLang === 'en' ? 'en' : 'vi';
+    const rawLang = String((m && m.lang) || 'Vietsub').trim();
+    if (subs.length >= 2) {
+      const viMap = { vi: 'Vietsub', en: 'Engsub', zh: 'Sub Trung', ja: 'Sub Nhật', ko: 'Sub Hàn', th: 'Sub Thái' };
+      const enMap = { vi: 'VI Sub', en: 'EN Sub', zh: 'ZH Sub', ja: 'JA Sub', ko: 'KO Sub', th: 'TH Sub' };
+      const map = ui === 'en' ? enMap : viMap;
+      const ordered = [...subs].sort((a, b) => ((a === 'vi' ? 0 : (a === 'en' ? 1 : 2)) - (b === 'vi' ? 0 : (b === 'en' ? 1 : 2))));
+      const top = ordered.slice(0, 2).map((c) => map[c] || c.toUpperCase());
+      const extra = ordered.length > 2 ? ' +' + (ordered.length - 2) : '';
+      return top.join(' + ') + extra;
+    }
+    if (ui === 'en') {
+      return rawLang.replace(/Vietsub/gi, 'VI Sub').replace(/Engsub/gi, 'EN Sub').replace(/Thuyết Minh/gi, 'Voiceover').replace(/Lồng Tiếng/gi, 'Dubbed');
+    }
+    return rawLang || 'Vietsub';
+  }
+
+  function openTvLanguageModal(isOnboarding) {
+    const root = document.getElementById('modalRoot');
+    if (!root) return;
+    const selUi = state.prefs.uiLang === 'en' ? 'en' : 'vi';
+    root.innerHTML = '<div class="modal-backdrop" id="tvLangBackdrop">' +
+      '<div class="modal-card" style="max-width:560px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+          '<strong style="font-size:24px">' + (isOnboarding ? 'Chọn ngôn ngữ / Choose Language' : tr('Ngôn ngữ & Phụ đề mặc định', 'Language & Default Subtitle')) + '</strong>' +
+          (isOnboarding ? '' : '<button class="tb-btn tv-focus" id="btnCloseTvLang" data-focus-key="tvlang:close" tabindex="-1" style="margin:0">' + svgIcon('close', 18) + '</button>') +
+        '</div>' +
+        '<div style="font-size:15px;color:var(--text-secondary);margin-bottom:18px">' +
+          (isOnboarding ? 'Thiết lập ngôn ngữ giao diện TV và phụ đề mặc định khi phát phim:' : tr('Chọn ngôn ngữ hiển thị và phụ đề mặc định:', 'Choose display language and default subtitle:')) +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;grid-gap:12px">' +
+          '<button class="s-row tv-focus" id="btnTvLangVi" data-focus-key="tvlang:vi" tabindex="-1" style="display:flex;flex-direction:column;align-items:flex-start;padding:18px;border-radius:14px;border:2px solid ' + (selUi === 'vi' ? 'var(--accent)' : 'var(--card-stroke)') + ';background:var(--card-fill)">' +
+            '<div style="font-size:19px;font-weight:800">Tiếng Việt</div>' +
+            '<div style="font-size:13px;color:var(--text-secondary);margin-top:4px">Giao diện Tiếng Việt • Phụ đề mặc định: Tiếng Việt</div>' +
+          '</button>' +
+          '<button class="s-row tv-focus" id="btnTvLangEn" data-focus-key="tvlang:en" tabindex="-1" style="display:flex;flex-direction:column;align-items:flex-start;padding:18px;border-radius:14px;border:2px solid ' + (selUi === 'en' ? 'var(--accent)' : 'var(--card-stroke)') + ';background:var(--card-fill)">' +
+            '<div style="font-size:19px;font-weight:800">English</div>' +
+            '<div style="font-size:13px;color:var(--text-secondary);margin-top:4px">English UI • Default Subtitle: English</div>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    const choose = (lang) => {
+      state.prefs.uiLang = lang;
+      state.prefs.defaultSubLang = lang;
+      state.prefs.langOnboarded = true;
+      savePrefs();
+      root.innerHTML = '';
+      render();
+      focusByKey('hero:play') || focusFirstInMain();
+    };
+    document.getElementById('btnTvLangVi').onclick = () => choose('vi');
+    document.getElementById('btnTvLangEn').onclick = () => choose('en');
+    const cl = document.getElementById('btnCloseTvLang');
+    if (cl) cl.onclick = () => { root.innerHTML = ''; focusByKey(state.lastFocusKey) || focusFirstInMain(); };
+    focusByKey(selUi === 'en' ? 'tvlang:en' : 'tvlang:vi');
+  }
+
   function movieCardHtml(m, focusPrefix) {
     const primary = resolveImg(m.poster_url || m.thumb_url) || IMG_FALLBACK_SVG;
     const secondary = resolveImg(m.thumb_url || m.poster_url) || '';
@@ -476,7 +543,7 @@
         (badge ? '<span class="poster-badge">' + esc(badge) + '</span>' : '') +
       '</div>' +
       '<div class="movie-name">' + esc(m.name) + '</div>' +
-      '<div class="movie-meta">' + esc(yr + (m.lang || 'Vietsub')) + '</div>' +
+      '<div class="movie-meta">' + esc(yr + formatSubBadge(m)) + '</div>' +
     '</button>';
   }
 
@@ -497,7 +564,7 @@
       imgEl.src = bg;
     }
     const tagEl = heroEl.querySelector('.hero-tag');
-    if (tagEl) tagEl.textContent = 'PHIM MỚI / ' + (hero.quality || 'HD');
+    if (tagEl) tagEl.textContent = tr('PHIM MỚI', 'NEW') + ' / ' + (hero.quality || 'HD') + ' / ' + formatSubBadge(hero);
     const titleEl = heroEl.querySelector('.hero-title');
     if (titleEl) titleEl.textContent = hero.name || '';
     const subEl = heroEl.querySelector('.hero-sub');
@@ -540,7 +607,7 @@
           '<img class="hero-bg" decoding="async" src="' + esc(bg) + '" data-fallback="' + esc(bgFb) + '" alt="" />' +
           '<div class="hero-grad"></div>' +
           '<div class="hero-body">' +
-            '<span class="hero-tag">PHIM MỚI / ' + esc(hero.quality || 'HD') + '</span>' +
+            '<span class="hero-tag">' + tr('PHIM MỚI', 'NEW') + ' / ' + esc(hero.quality || 'HD') + ' / ' + esc(formatSubBadge(hero)) + '</span>' +
             '<h2 class="hero-title">' + esc(hero.name) + '</h2>' +
             '<div class="hero-sub">' + esc(hero.origin_name || '') + (hero.year ? ' (' + hero.year + ')' : '') + '</div>' +
             '<div class="hero-actions">' +
@@ -1103,7 +1170,21 @@
       '</div>' +
 
       '<div class="settings-section">' +
-        '<div class="settings-label">Trình phát TV</div>' +
+        '<div class="settings-label">' + tr('Ngôn ngữ & Phụ đề', 'Language & Subtitles') + '</div>' +
+        '<div class="settings-card">' +
+          '<button class="s-row tv-focus" id="btnToggleUiLang" data-focus-key="set:lang" tabindex="-1">' +
+            '<span>' + tr('Ngôn ngữ giao diện', 'Interface Language') + '</span>' +
+            '<span class="pill-toggle on">' + (state.prefs.uiLang === 'en' ? 'English' : 'Tiếng Việt') + '</span>' +
+          '</button>' +
+          '<button class="s-row tv-focus" id="btnCycleDefaultSub" data-focus-key="set:subdefault" tabindex="-1">' +
+            '<span>' + tr('Phụ đề mặc định', 'Default Subtitle') + '</span>' +
+            '<span class="pill-toggle on">' + (state.prefs.defaultSubLang === 'en' ? 'English' : (state.prefs.defaultSubLang === 'off' ? tr('Tắt', 'Off') : 'Tiếng Việt')) + '</span>' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="settings-section">' +
+        '<div class="settings-label">' + tr('Trình phát TV', 'TV Player') + '</div>' +
         '<div class="settings-card">' +
           '<button class="s-row tv-focus" id="btnToggleAutoAds" data-focus-key="set:autoads" tabindex="-1">' +
             '<span>Tự cắt đoạn quảng cáo (TheIntroDB)</span>' +
@@ -1123,7 +1204,7 @@
       '<div class="settings-section">' +
         '<div class="settings-label">Ứng dụng</div>' +
         '<div class="settings-card">' +
-          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.1.0 (bond.maniakov.maniflix)</span></div>' +
+          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.2.0 (bond.maniakov.maniflix)</span></div>' +
           '<button class="s-row tv-focus" id="btnResetPrefs" data-focus-key="set:reset" tabindex="-1">' +
             '<span style="color:#ff453a;font-weight:700">Đặt lại cài đặt mặc định</span>' +
           '</button>' +
@@ -1191,7 +1272,7 @@
 
     const root = document.getElementById('playerRoot');
     const rawUrl = ep.link_m3u8.trim();
-    const cleanUrl = API_BASE + '/api/clean-m3u8?url=' + encodeURIComponent(rawUrl);
+    const cleanUrl = API_BASE + '/api/clean-m3u8?url=' + encodeURIComponent(rawUrl) + '&sub=' + encodeURIComponent(state.prefs.defaultSubLang || 'vi');
 
     let hls = null;
     let markers = [];
@@ -1251,6 +1332,7 @@
             '<button class="tb-btn tv-focus" id="btnNextEp" data-focus-key="player:next" tabindex="-1"' + (episodeIndex + 1 >= srv.server_data.length ? ' disabled style="opacity:0.4"' : '') + '>' + svgIcon('next', 18) + '<span>Tập sau</span></button>' +
           '</div>' +
           '<div class="player-btn-group">' +
+            '<button class="tb-btn tv-focus" id="btnPlayerSub" data-focus-key="player:sub" tabindex="-1">Phụ đề: Tự động</button>' +
             '<button class="tb-btn tv-focus" id="btnPlayerQuality" data-focus-key="player:quality" tabindex="-1">Chất lượng: Tự động</button>' +
             '<button class="tb-btn tv-focus" id="btnPlayerSpeed" data-focus-key="player:speed" tabindex="-1">Tốc độ: 1x</button>' +
             '<button class="tb-btn tv-focus" id="btnPlayerAspect" data-focus-key="player:aspect" tabindex="-1">Tỉ lệ: Gốc</button>' +
@@ -1355,15 +1437,35 @@
       if (window.Hls && window.Hls.isSupported()) {
         hls = new window.Hls({
           enableWorker: true,
+          subtitleDisplay: true,
           maxBufferLength: 24,
           maxMaxBufferLength: 45,
           backBufferLength: 10
         });
         hls.loadSource(srcUrl);
         hls.attachMedia(video);
-        hls.on(window.Hls.Events.MANIFEST_PARSED, (_, data) => {
+                hls.on(window.Hls.Events.MANIFEST_PARSED, (_, data) => {
           levels = (data && data.levels) ? data.levels : (hls.levels || []);
           updateQualityButton();
+        });
+        hls.on(window.Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+          const tracks = hls.subtitleTracks || [];
+          const defSub = (state.prefs.defaultSubLang || 'vi').toLowerCase();
+          const btnSub = document.getElementById('btnPlayerSub');
+          if (defSub === 'off') {
+            hls.subtitleTrack = -1;
+            if (btnSub) btnSub.textContent = tr('Phụ đề: Tắt', 'Sub: Off');
+            return;
+          }
+          const re = defSub === 'en' ? /\b(en|eng|english)\b/i : /vi|vie|viet/i;
+          let matchIdx = tracks.findIndex((t) => re.test((t.lang || '') + ' ' + (t.name || '')));
+          if (matchIdx < 0) matchIdx = tracks.findIndex((t) => /vi|vie|viet/i.test((t.lang || '') + ' ' + (t.name || '')));
+          if (matchIdx >= 0) hls.subtitleTrack = matchIdx;
+          else if (tracks.length > 0 && hls.subtitleTrack < 0) hls.subtitleTrack = 0;
+          if (btnSub && tracks.length > 0) {
+            const cur = tracks[hls.subtitleTrack];
+            btnSub.textContent = tr('Phụ đề: ', 'Sub: ') + (cur ? (cur.name || cur.lang || 'VI') : tr('Tắt', 'Off'));
+          }
         });
         hls.on(window.Hls.Events.ERROR, (_, data) => {
           if (data && data.fatal) {
@@ -1482,6 +1584,20 @@
       document.getElementById('btnPlayerSpeed').textContent = 'Tốc độ: ' + speeds[speedIdx] + 'x';
       showHud(true);
     };
+    document.getElementById('btnPlayerSub').onclick = () => {
+      if (!hls || !(hls.subtitleTracks && hls.subtitleTracks.length)) {
+        toast(tr('Phim này không có phụ đề rời', 'No soft subtitles available'));
+        return;
+      }
+      const tracks = hls.subtitleTracks;
+      let nextIdx = hls.subtitleTrack + 1;
+      if (nextIdx >= tracks.length) nextIdx = -1;
+      hls.subtitleTrack = nextIdx;
+      hls.subtitleDisplay = nextIdx >= 0;
+      const lbl = nextIdx >= 0 ? (tracks[nextIdx].name || tracks[nextIdx].lang || 'Sub') : tr('Tắt', 'Off');
+      document.getElementById('btnPlayerSub').textContent = tr('Phụ đề: ', 'Sub: ') + lbl;
+      showHud(true);
+    };
     document.getElementById('btnPlayerQuality').onclick = () => {
       if (!hls || !levels.length) {
         toast('Đang phát chất lượng tự động');
@@ -1496,7 +1612,7 @@
     document.getElementById('btnFailover').onclick = () => {
       const lbl = document.getElementById('playerSourceLbl');
       const isClean = lbl && lbl.textContent.indexOf('Chuẩn') !== -1;
-      attachStream(isClean ? rawUrl : cleanUrl, isClean ? 'Dự phòng (gốc)' : 'Chuẩn (clean-m3u8)');
+      const isVs = rawUrl.indexOf('#vsmov.m3u8') !== -1; const fbUrl = isVs ? (cleanUrl + '&ap=1') : rawUrl; attachStream(isClean ? fbUrl : cleanUrl, isClean ? (isVs ? 'Dự phòng (proxy)' : 'Dự phòng (gốc)') : 'Chuẩn (clean-m3u8)');
       showHud(true);
     };
     document.getElementById('playerScrubber').onclick = (e) => {
@@ -1892,6 +2008,16 @@
       el.onclick = () => { state.settingsSubPage = el.dataset.subpage; render(); focusFirstInMain(); };
     });
 
+    const btnLang = document.getElementById('btnToggleUiLang');
+    if (btnLang) btnLang.onclick = () => { state.prefs.uiLang = state.prefs.uiLang === 'en' ? 'vi' : 'en'; savePrefs(); render(); };
+    const btnDefSub = document.getElementById('btnCycleDefaultSub');
+    if (btnDefSub) btnDefSub.onclick = () => {
+      const order = ['vi', 'en', 'off'];
+      const idx = (order.indexOf(state.prefs.defaultSubLang || 'vi') + 1) % order.length;
+      state.prefs.defaultSubLang = order[idx];
+      savePrefs();
+      render();
+    };
     const btnAds = document.getElementById('btnToggleAutoAds');
     if (btnAds) btnAds.onclick = () => { state.prefs.autoCutAds = !state.prefs.autoCutAds; savePrefs(); render(); };
     const btnSkip = document.getElementById('btnCycleIntroSkip');
@@ -2405,4 +2531,7 @@
   applyTheme();
   bootstrapAuth();
   loadDiscover();
+  if (!state.prefs.langOnboarded) {
+    setTimeout(() => openTvLanguageModal(true), 200);
+  }
 })();
