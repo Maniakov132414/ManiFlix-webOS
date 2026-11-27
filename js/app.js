@@ -1204,7 +1204,7 @@
       '<div class="settings-section">' +
         '<div class="settings-label">Ứng dụng</div>' +
         '<div class="settings-card">' +
-          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.2.0 (bond.maniakov.maniflix)</span></div>' +
+          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">1.2.1 (bond.maniakov.maniflix)</span></div>' +
           '<button class="s-row tv-focus" id="btnResetPrefs" data-focus-key="set:reset" tabindex="-1">' +
             '<span style="color:#ff453a;font-weight:700">Đặt lại cài đặt mặc định</span>' +
           '</button>' +
@@ -1594,6 +1594,20 @@
       if (nextIdx >= tracks.length) nextIdx = -1;
       hls.subtitleTrack = nextIdx;
       hls.subtitleDisplay = nextIdx >= 0;
+          if (video && video.textTracks) {
+            const idx = hls.subtitleTrack;
+            const trk = (idx >= 0 && hls.subtitleTracks) ? hls.subtitleTracks[idx] : null;
+            const aL = trk ? String(trk.lang || '').toLowerCase() : '';
+            const aN = trk ? String(trk.name || '').toLowerCase() : '';
+            for (let i = 0; i < video.textTracks.length; i++) {
+              const tt = video.textTracks[i];
+              if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
+              if (idx < 0) { tt.mode = 'disabled'; continue; }
+              const tL = String(tt.language || '').toLowerCase();
+              const tN = String(tt.label || '').toLowerCase();
+              tt.mode = ((tL && aL && (tL === aL || tL.indexOf(aL.slice(0, 2)) === 0)) || (tN && aN && tN === aN) || video.textTracks.length === 1) ? 'showing' : 'hidden';
+            }
+          }
       const lbl = nextIdx >= 0 ? (tracks[nextIdx].name || tracks[nextIdx].lang || 'Sub') : tr('Tắt', 'Off');
       document.getElementById('btnPlayerSub').textContent = tr('Phụ đề: ', 'Sub: ') + lbl;
       showHud(true);

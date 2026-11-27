@@ -69,13 +69,13 @@ jobs:
           path: dist/ManiFlix-webOS.ipk
           retention-days: 30
 
-      - name: Publish Release v1.2.0
+      - name: Publish Release v1.2.1
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.0
-          name: ManiFlix webOS TV v1.2.0
+          tag_name: v1.2.1
+          name: ManiFlix webOS TV v1.2.1
           body: |
-            ## ManiFlix LG webOS Smart TV (`v1.2.0`)
+            ## ManiFlix LG webOS Smart TV (`v1.2.1`)
             - Tối ưu 60fps trên TV GPU: loại bỏ CSS blur/mask nặng, chuyển focus sang GPU `translate3d`/`scale`, `contain: layout paint`, và chế độ **Siêu Mượt TV**.
             - Điều hướng D-Pad O(1) theo hàng/lưới + tiết lưu phím giữ 75ms, chống xung đột con trỏ Magic Remote (>10px delta), và cập nhật DOM cục bộ cho Hero / Tải thêm phim / Yêu thích.
             - App ID: `bond.maniakov.maniflix` (1920x1080 webOS TV), cài đặt trực tiếp qua **webOS Dev Manager** với tệp `ManiFlix-webOS.ipk`.
