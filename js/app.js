@@ -4,7 +4,7 @@
   const API_BASE = 'https://phim.maniakov.bond';
   const CF_DOWN = 'https://speed.cloudflare.com/__down';
   const CF_UP = 'https://speed.cloudflare.com/__up';
-  const APP_VERSION = '2.0.2';
+  const APP_VERSION = '2.0.3';
   const APP_PKG_ID = 'bond.maniakov.maniflix';
   const TV_VERSION_ENDPOINT = '/api/webos/version';
   const TV_DOWNLOAD_URL = 'https://phim.maniakov.bond/download/webos';
@@ -1532,10 +1532,26 @@
     '</div>';
   }
 
-  function openPlayer(movie, servers, serverIndex, episodeIndex, resumeTime) {
+  function openPlayer(movie, servers, serverIndex, episodeIndex, resumeTime, triedServersSet) {
+    const triedServerIndices = (triedServersSet instanceof Set) ? new Set(triedServersSet) : new Set();
+    triedServerIndices.add(serverIndex);
     const srv = servers[serverIndex] || { server_data: [] };
     const ep = srv.server_data[episodeIndex];
     if (!ep || !ep.link_m3u8) {
+      if (Array.isArray(servers) && servers.length > 1) {
+        for (let i = 0; i < servers.length; i++) {
+          if (triedServerIndices.has(i)) continue;
+          const altData = (servers[i] && Array.isArray(servers[i].server_data)) ? servers[i].server_data : [];
+          if (!altData.length) continue;
+          const altEpIdx = Math.max(0, Math.min(episodeIndex, altData.length - 1));
+          if (altData[altEpIdx] && altData[altEpIdx].link_m3u8) {
+            state.selectedServerIdx = i;
+            toast('Máy chủ hiện tại bận, đang tự động chuyển sang máy chủ dự phòng...');
+            openPlayer(movie, servers, i, altEpIdx, resumeTime, triedServerIndices);
+            return;
+          }
+        }
+      }
       toast('Tập này chưa có luồng HLS');
       return;
     }
@@ -1546,7 +1562,8 @@
 
     const root = document.getElementById('playerRoot');
     const rawUrl = ep.link_m3u8.trim();
-    const cleanUrl = API_BASE + '/api/clean-m3u8?url=' + encodeURIComponent(rawUrl) + '&sub=' + encodeURIComponent(state.prefs.defaultSubLang || 'vi');
+    const prefSub = state.prefs.defaultSubLang || 'vi';
+    const cleanUrl = API_BASE + '/api/clean-m3u8?url=' + encodeURIComponent(rawUrl) + '&sub=' + encodeURIComponent(prefSub);
 
     let hls = null;
     let markers = [];
@@ -1740,6 +1757,52 @@
       return out;
     }
 
+    let autoFailoverTriggered = false;
+    function tryTvAutoFailover() {
+      if (autoFailoverTriggered || !Array.isArray(servers) || servers.length <= 1) return false;
+      triedServerIndices.add(serverIndex);
+      let nextIdx = -1;
+      for (let i = 0; i < servers.length; i++) {
+        if (triedServerIndices.has(i)) continue;
+        const sData = (servers[i] && Array.isArray(servers[i].server_data)) ? servers[i].server_data : [];
+        if (sData.length > 0) {
+          nextIdx = i;
+          break;
+        }
+      }
+      if (nextIdx < 0) return false;
+      const nextData = servers[nextIdx].server_data || [];
+      const normEpName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const parseEpNum = (s) => {
+        const str = String(s || '').trim();
+        if (/\b(ova|special|sp)\b/i.test(str) && !/\b(?:tập|tap|ep|episode)\s*[1-9]/i.test(str)) return null;
+        const m = str.match(/(\d+)/);
+        return m ? parseInt(m[1], 10) : null;
+      };
+      let targetEpIdx = Math.max(0, Math.min(episodeIndex, nextData.length - 1));
+      if (ep && ep.name) {
+        const curNorm = normEpName(ep.name);
+        const exactIdx = nextData.findIndex((x) => normEpName(x && x.name) === curNorm);
+        if (exactIdx >= 0) {
+          targetEpIdx = exactIdx;
+        } else {
+          const curNum = parseEpNum(ep.name);
+          if (curNum !== null) {
+            const numIdx = nextData.findIndex((x) => parseEpNum(x && x.name) === curNum);
+            if (numIdx >= 0) targetEpIdx = numIdx;
+          }
+        }
+      }
+      const curPos = (video && video.currentTime > 0) ? Math.floor(video.currentTime) : (resumeTime || 0);
+      autoFailoverTriggered = true;
+      triedServerIndices.add(nextIdx);
+      state.selectedServerIdx = nextIdx;
+      toast('Máy chủ hiện tại bận, đang tự động chuyển sang máy chủ dự phòng...');
+      closePlayer();
+      openPlayer(movie, servers, nextIdx, targetEpIdx, curPos, triedServerIndices);
+      return true;
+    }
+
     function attachStream(srcUrl, label) {
       const lbl = document.getElementById('playerSourceLbl');
       if (lbl) lbl.textContent = 'Nguồn: ' + label;
@@ -1748,6 +1811,12 @@
       currentLevel = -1;
       updateQualityButton();
       updateSubButtonVisibility([]);
+      video.onerror = () => {
+        if (hls && !hls._mfExhausted) return;
+        if (!tryTvAutoFailover()) {
+          toast('Không thể phát luồng hiện tại, thử chọn server khác');
+        }
+      };
 
       if (window.Hls && window.Hls.isSupported()) {
         hls = new window.Hls({
@@ -1787,11 +1856,20 @@
         });
         hls.on(window.Hls.Events.ERROR, (_, data) => {
           if (data && data.fatal) {
-            if (srcUrl !== rawUrl) {
-              attachStream(rawUrl, 'Dự phòng (gốc)');
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-              if (hls) { hls.destroy(); hls = null; }
-              video.src = rawUrl;
+            const isVs = rawUrl.indexOf('/api/hls-master/') !== -1 || rawUrl.indexOf('/api/raw-hls/') !== -1;
+            const isBackendVirtual = rawUrl.indexOf('/api/ani-master/') !== -1 || rawUrl.indexOf('/api/hls-src/') !== -1;
+            const fbUrl = isVs ? (cleanUrl + '&ap=1') : rawUrl;
+            if (!isBackendVirtual && srcUrl !== fbUrl) {
+              attachStream(fbUrl, isVs ? 'Dự phòng (proxy)' : 'Dự phòng (gốc)');
+            } else {
+              if (hls) hls._mfExhausted = true;
+              if (tryTvAutoFailover()) return;
+              if (!isVs && !isBackendVirtual && video.canPlayType('application/vnd.apple.mpegurl')) {
+                if (hls) { hls.destroy(); hls = null; }
+                video.src = rawUrl;
+              } else {
+                toast('Không thể phát luồng hiện tại, thử chọn server khác');
+              }
             }
           }
         });
