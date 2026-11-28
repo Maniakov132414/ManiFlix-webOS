@@ -544,11 +544,55 @@
     return { primary, secondary, secondaryWithYear };
   }
 
+  function cleanFranchiseTitle(raw) {
+    return String(raw || '').replace(/^[\s:\-–—•|·/.,]+|[\s:\-–—•|·/]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  function buildOrthoFlexPattern(prefixStr) {
+    const clean = cleanFranchiseTitle(prefixStr);
+    if (!clean || clean.length < 3) return '';
+    return clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/['’‘`]/g, "['’‘`]?")
+      .replace(/[ìỳ]/gi, '[ìỳ]')
+      .replace(/[íý]/gi, '[íý]')
+      .replace(/[ỉỷ]/gi, '[ỉỷ]')
+      .replace(/[ĩỹ]/gi, '[ĩỹ]')
+      .replace(/[ịỵ]/gi, '[ịỵ]')
+      .replace(/(?:òa|oà)/gi, '(?:òa|oà)')
+      .replace(/(?:óa|oá)/gi, '(?:óa|oá)')
+      .replace(/(?:ỏa|oả)/gi, '(?:ỏa|oả)')
+      .replace(/(?:õa|oã)/gi, '(?:õa|oã)')
+      .replace(/(?:ọa|oạ)/gi, '(?:ọa|oạ)')
+      .replace(/(?:ùy|uỳ)/gi, '(?:ùy|uỳ)')
+      .replace(/(?:úy|uý)/gi, '(?:úy|uý)')
+      .replace(/(?:ủy|uỷ)/gi, '(?:ủy|uỷ)')
+      .replace(/(?:ũy|uỹ)/gi, '(?:ũy|uỹ)')
+      .replace(/(?:ụy|uỵ)/gi, '(?:ụy|uỵ)')
+      .replace(/\s+/g, '[\\s:\\-–—•|·]+');
+  }
+
+  function sortFranchiseList(rawList) {
+    const arr = Array.isArray(rawList) ? rawList.slice() : [];
+    const hasSort = arr.some((x) => x && typeof x.sortIndex === 'number');
+    return arr.map((s, idx) => ({ s, idx })).sort((a, b) => {
+      const la = (a.s && a.s.isLiveAction === true) ? 1 : 0;
+      const lb = (b.s && b.s.isLiveAction === true) ? 1 : 0;
+      if (la !== lb) return la - lb;
+      if (hasSort) {
+        const sa = typeof a.s.sortIndex === 'number' ? a.s.sortIndex : 9999;
+        const sb = typeof b.s.sortIndex === 'number' ? b.s.sortIndex : 9999;
+        if (sa !== sb) return sa - sb;
+      }
+      return a.idx - b.idx;
+    }).map((x) => x.s);
+  }
+
   function formatFranchiseSeasonChip(s, frMeta, list) {
     const ui = state.prefs.uiLang === 'en' ? 'en' : 'vi';
     const meta = frMeta || {};
     const prefixes = [meta.baseTitleVi, meta.baseTitleEn, meta.baseTitleRomaji, meta.baseTitle]
-      .map((x) => String(x || '').trim()).filter((x) => x.length >= 3).sort((a, b) => b.length - a.length);
+      .map((x) => cleanFranchiseTitle(x)).filter((x) => x.length >= 3).sort((a, b) => b.length - a.length);
+    const pats = prefixes.map(buildOrthoFlexPattern).filter(Boolean);
     const hasSeason2 = (list || []).some((it) => {
       if (Number(it && it.seasonNumber) >= 2) return true;
       const pr = ((it && it.name) || '') + ' ' + ((it && it.nameVi) || '') + ' ' + ((it && it.nameEn) || '') + ' ' + ((it && it.fullTitle) || '') + ' ' + ((it && it.slug) || '');
@@ -556,19 +600,28 @@
     });
     let cur = String(ui === 'en' ? (s.nameEn || s.name || s.title || s.fullTitle || '') : (s.nameVi || s.name || s.title || s.fullTitle || '')).trim();
     const rawPicked = cur;
-    for (let i = 0; i < prefixes.length; i++) {
-      const escRe = prefixes[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp('^' + escRe + '[\\s:!\\-–—.]*$', 'i').test(cur)) { cur = ''; break; }
-      const leadRe = new RegExp('^' + escRe + '(?:\\s*[:\\-–—!|•]+\\s*|\\s+(?=(?:Movie|Phần|Phan|Season|SS|Mùa|OVA|ONA|Special|SP|Mini|Idol|Shinonome|Chapter|Part|Arc)\\b))', 'i');
+    for (let i = 0; i < pats.length; i++) {
+      const pat = pats[i];
+      if (new RegExp('^' + pat + '[\\s:!\\-–—.]*$', 'i').test(cur)) { cur = ''; break; }
+      const leadRe = new RegExp('^' + pat + '(?:\\s*[:\\-–—!|•/]+\\s*|\\s+(?=(?:Movie|Phần|Phan|Season|SS|Mùa|OVA|ONA|Special|SP|Mini|Idol|Shinonome|Chapter|Part|Arc|Episode|Tập|\\d+|II|III|IV|V|VI)\\b))', 'i');
       if (leadRe.test(cur)) { cur = cur.replace(leadRe, '').trim(); break; }
+      const trailRe = new RegExp('(?:\\s*[:\\-–—|•]+\\s*)' + pat + '(\\s*\\((?:Live-Action|Movie|OVA|ONA|Special|TV)\\))?[\\s.!]*$', 'i');
+      if (trailRe.test(cur)) {
+        const cand = cur.replace(trailRe, '$1').trim();
+        if (cand.length >= 2) { cur = cand; break; }
+      }
     }
-    cur = cur.replace(/^[:\-–—•|\s]+/, '').trim();
+    cur = cur.replace(/^[:\-–—•|\s]+|[:\-–—•|\s]+$/g, '').trim();
     if (!cur || /^tv\s*series$/i.test(cur)) {
       cur = /^tv\s*series$/i.test(rawPicked) ? 'TV Series' : (hasSeason2 ? (ui === 'en' ? 'Season 1' : 'Phần 1') : 'TV Series');
     } else if (ui === 'en' && !s.nameEn) {
       cur = cur.replace(/^Phần\s+(\d+)\b/i, 'Season $1').replace(/^Mùa\s+(\d+)\b/i, 'Season $1');
     } else if (ui === 'vi' && !s.nameVi) {
       cur = cur.replace(/^Season\s+(\d+)\b/i, 'Phần $1');
+    }
+    if (s && s.isLiveAction === true) {
+      cur = cur.replace(/\s*\((?:Movie|Phim\s*Lẻ)\)\s*/gi, ' ').replace(/\s{2,}/g, ' ').trim();
+      if (!/\(\s*live[\s\-]*action\s*\)/i.test(cur)) cur += ' (Live-Action)';
     }
     const fullTip = (ui === 'en' ? (s.originName || s.fullTitle || cur) : (s.fullTitle || cur)) + (s.year ? ' (' + s.year + ')' : '');
     return { label: cur, tooltip: fullTip };
@@ -800,12 +853,12 @@
         api('/api/franchise?slug=' + encodeURIComponent(slug)).catch(() => ({ seasons: [] }))
       ]);
       state.detailData = pair[0];
-      state.detailFranchise = pair[1].seasons || [];
+      state.detailFranchise = sortFranchiseList(pair[1].seasons || []);
       state.detailFranchiseMeta = {
-        baseTitle: pair[1].baseTitle || '',
-        baseTitleVi: pair[1].baseTitleVi || (pair[0].movie && pair[0].movie.vi_name) || '',
-        baseTitleEn: pair[1].baseTitleEn || (pair[0].movie && pair[0].movie.en_name) || '',
-        baseTitleRomaji: pair[1].baseTitleRomaji || (pair[0].movie && pair[0].movie.romaji_name) || ''
+        baseTitle: cleanFranchiseTitle(pair[1].baseTitle || ''),
+        baseTitleVi: cleanFranchiseTitle(pair[1].baseTitleVi || (pair[0].movie && pair[0].movie.vi_name) || ''),
+        baseTitleEn: cleanFranchiseTitle(pair[1].baseTitleEn || (pair[0].movie && pair[0].movie.en_name) || ''),
+        baseTitleRomaji: cleanFranchiseTitle(pair[1].baseTitleRomaji || (pair[0].movie && pair[0].movie.romaji_name) || '')
       };
       if (pair[0].movie) {
         setAmbientUrl(resolveImg(pair[0].movie.poster_url || pair[0].movie.thumb_url));
@@ -878,9 +931,9 @@
     let franchiseHtml = '';
     if (state.detailFranchise.length > 1) {
       const fMeta = state.detailFranchiseMeta || {};
-      const fBase = state.prefs.uiLang === 'en'
+      const fBase = cleanFranchiseTitle(state.prefs.uiLang === 'en'
         ? (fMeta.baseTitleEn || getDisplayTitles({ name: fMeta.baseTitle, vi_name: fMeta.baseTitleVi, en_name: fMeta.baseTitleEn, romaji_name: fMeta.baseTitleRomaji }).primary || '')
-        : (fMeta.baseTitleVi || getDisplayTitles({ name: fMeta.baseTitle, vi_name: fMeta.baseTitleVi, en_name: fMeta.baseTitleEn, romaji_name: fMeta.baseTitleRomaji }).primary || '');
+        : (fMeta.baseTitleVi || getDisplayTitles({ name: fMeta.baseTitle, vi_name: fMeta.baseTitleVi, en_name: fMeta.baseTitleEn, romaji_name: fMeta.baseTitleRomaji }).primary || ''));
       const fHdr = state.prefs.uiLang === 'en'
         ? (fBase ? 'Franchise: ' + fBase + ' (' + state.detailFranchise.length + ' parts)' : 'Franchise (' + state.detailFranchise.length + ' parts)')
         : (fBase ? 'Các phần phim: ' + fBase + ' (' + state.detailFranchise.length + ' phần)' : 'Các phần phim (' + state.detailFranchise.length + ')');
@@ -1831,7 +1884,12 @@
     document.getElementById('playerScrubber').onclick = (e) => {
       const rect = e.currentTarget.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
-      if (video.duration) video.currentTime = ratio * video.duration;
+      if (video.duration) {
+        const target = ratio * video.duration;
+        if (hls) { try { hls.startLoad(target); } catch (err) {} }
+        video.currentTime = target;
+        evaluateSkipMarkers(true);
+      }
       showHud(true);
     };
 
