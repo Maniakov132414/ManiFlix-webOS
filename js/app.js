@@ -467,6 +467,113 @@
     }
   }
 
+  const VI_DIACRITIC_RE = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+  const PURE_CJK_RE = /^[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\s\d:!\-–—·.,'()[\]「」『』！？：、。／/]+$/;
+  const HAS_CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+  const ROMAJI_TOKEN_RE = /\b(no|wa|ga|wo|ni|kara|made|tachi|monogatari|kyoukai|kanata|shoujo|shounen|sekai|kimi|boku|ore|mahou|tensei|isekai|kuromukuro|shinonome|gekijou|saiban|kako|mirai|kimetsu|yaiba|shingeki|kyojin|jujutsu|kaisen|sousou|kusuriya|hitorigoto|kaguya|kokoro|hikari|yami|kaze|sora|hoshi|yume|kami|oni|ryuu|ouji|hime|gakuen|sensou|densetsu|bouken|yuusha|maou|seirei|tenshi|akuma|shinigami|kyoushitsu|shigatsu|ansatsu|nanatsu|taizai|shokugeki|yakusoku|fumetsu|nariagari|subarashii|hajimeru|seishun|yarou|ressha|yuukaku|katanakaji|hashira|geiko)\b/i;
+  const EN_COMMON_RE = /\b(the|beyond|boundary|of|and|in|for|with|from|into|world|story|movie|season|part|demon|slayer|attack|titan|my|hero|academia|sword|art|online|game|life|way|home|country|old|men|time|die|love|war|star|wars|lord|rings|harry|potter|avengers|spider|batman|superman|iron|captain|deadpool|wolverine|stranger|things|breaking|bad|walking|dead|house|dragon|throne|arcane|cyberpunk|edgerunners|frieren|journey|end|apothecary|diaries|solo|leveling|chainsaw|one|piece|ball|bleach|black|clover|hunter|blue|lock|wind|breaker|classroom|elite|reincarnated|slime|shield|rising|eminence|shadow|jobless|overlord|rascal|dream|bunny|girl|violet|evergarden|silent|voice|your|name|weathering|you|spirited|away|howl|moving|castle|princess|mononoke)\b/i;
+
+  function normCmp(s) {
+    return String(s || '').toLowerCase().replace(/[\s\-–—:·.,!?'()[\]"“”]+/g, ' ').trim();
+  }
+  function stripInlineCjk(s) {
+    const raw = String(s || '').trim();
+    if (!raw || PURE_CJK_RE.test(raw)) return '';
+    const cleaned = raw.replace(/\([\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\s:!\-–—·.,']+\)/g, '').replace(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+/g, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s/|\-–—:•]+|[\s/|\-–—:•]+$/g, '').trim();
+    return cleaned.length >= 2 ? cleaned : '';
+  }
+  function classifyTitleSeg(seg) {
+    const s = String(seg || '').trim();
+    if (!s) return 'empty';
+    if (PURE_CJK_RE.test(s)) return 'cjk';
+    if (VI_DIACRITIC_RE.test(s)) return 'vi';
+    const latin = HAS_CJK_RE.test(s) ? stripInlineCjk(s) : s;
+    if (!latin) return 'cjk';
+    if (VI_DIACRITIC_RE.test(latin)) return 'vi';
+    if (ROMAJI_TOKEN_RE.test(latin) && !EN_COMMON_RE.test(latin)) return 'romaji';
+    return 'en';
+  }
+  function getDisplayTitles(m) {
+    if (!m || typeof m !== 'object') return { primary: '', secondary: '', secondaryWithYear: '' };
+    const ui = state.prefs.uiLang === 'en' ? 'en' : 'vi';
+    const rawName = String(m.name || m.title || '').trim();
+    const rawOrig = String(m.origin_name || m.originName || '').trim();
+    const yearStr = (m.year && String(m.year).trim() && String(m.year) !== '0') ? String(m.year).trim() : '';
+    let viTitle = String(m.vi_name || '').trim();
+    let enTitle = String(m.en_name || '').trim();
+    let romajiTitle = String(m.romaji_name || '').trim();
+    let otherLatin = '';
+    let cjkFallback = '';
+    if (enTitle && PURE_CJK_RE.test(enTitle)) enTitle = '';
+    if (romajiTitle && PURE_CJK_RE.test(romajiTitle)) romajiTitle = '';
+    if (enTitle && HAS_CJK_RE.test(enTitle)) enTitle = stripInlineCjk(enTitle);
+    if (romajiTitle && HAS_CJK_RE.test(romajiTitle)) romajiTitle = stripInlineCjk(romajiTitle);
+    const segs = rawName.split(/\s+(?:\/|\||•|;)\s+/).concat(rawOrig.split(/\s+(?:\/|\||•|;)\s+/)).map((x) => x.trim()).filter(Boolean);
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const kind = classifyTitleSeg(seg);
+      const cleanSeg = (kind !== 'cjk' && HAS_CJK_RE.test(seg)) ? stripInlineCjk(seg) : seg;
+      if (kind === 'vi') { if (!viTitle) viTitle = cleanSeg; }
+      else if (kind === 'en') { if (!enTitle) enTitle = cleanSeg; else if (!otherLatin && normCmp(cleanSeg) !== normCmp(enTitle)) otherLatin = cleanSeg; }
+      else if (kind === 'romaji') { if (!romajiTitle) romajiTitle = cleanSeg; else if (!otherLatin && normCmp(cleanSeg) !== normCmp(romajiTitle)) otherLatin = cleanSeg; }
+      else if (kind === 'cjk') { if (!cjkFallback) cjkFallback = seg; }
+    }
+    const anyLatin = enTitle || romajiTitle || viTitle || otherLatin || stripInlineCjk(rawName) || stripInlineCjk(rawOrig);
+    const isDist = (a, b) => !!(a && b && normCmp(a) && normCmp(b) && normCmp(a) !== normCmp(b));
+    let primary = '';
+    let secondary = '';
+    if (ui === 'en') {
+      primary = enTitle || romajiTitle || otherLatin || viTitle || anyLatin || rawName || rawOrig || cjkFallback;
+      if (romajiTitle && isDist(primary, romajiTitle) && normCmp(primary).indexOf(normCmp(romajiTitle)) === -1) secondary = romajiTitle;
+      else if (otherLatin && isDist(primary, otherLatin)) secondary = otherLatin;
+      else if (viTitle && isDist(primary, viTitle)) secondary = viTitle;
+    } else if (viTitle) {
+      primary = viTitle;
+      const sp = [];
+      if (enTitle && isDist(primary, enTitle)) sp.push(enTitle);
+      if (romajiTitle && isDist(primary, romajiTitle) && (!enTitle || (isDist(enTitle, romajiTitle) && normCmp(enTitle).indexOf(normCmp(romajiTitle)) === -1))) sp.push(romajiTitle);
+      if (!sp.length && otherLatin && isDist(primary, otherLatin)) sp.push(otherLatin);
+      secondary = sp.slice(0, 2).join(' • ');
+    } else {
+      primary = enTitle || romajiTitle || otherLatin || anyLatin || rawName || rawOrig || cjkFallback;
+      if (romajiTitle && isDist(primary, romajiTitle)) secondary = romajiTitle;
+      else if (enTitle && isDist(primary, enTitle)) secondary = enTitle;
+      else if (otherLatin && isDist(primary, otherLatin)) secondary = otherLatin;
+    }
+    const secondaryWithYear = secondary ? (yearStr && secondary.indexOf(yearStr) === -1 ? secondary + ' (' + yearStr + ')' : secondary) : (yearStr ? '(' + yearStr + ')' : '');
+    return { primary, secondary, secondaryWithYear };
+  }
+
+  function formatFranchiseSeasonChip(s, frMeta, list) {
+    const ui = state.prefs.uiLang === 'en' ? 'en' : 'vi';
+    const meta = frMeta || {};
+    const prefixes = [meta.baseTitleVi, meta.baseTitleEn, meta.baseTitleRomaji, meta.baseTitle]
+      .map((x) => String(x || '').trim()).filter((x) => x.length >= 3).sort((a, b) => b.length - a.length);
+    const hasSeason2 = (list || []).some((it) => {
+      if (Number(it && it.seasonNumber) >= 2) return true;
+      const pr = ((it && it.name) || '') + ' ' + ((it && it.nameVi) || '') + ' ' + ((it && it.nameEn) || '') + ' ' + ((it && it.fullTitle) || '') + ' ' + ((it && it.slug) || '');
+      return /(?:phần|phan|season|ss|mùa|mua)[\s\-_]*(?:[2-9]|\d{2,}|ii|iii|iv)\b/i.test(pr);
+    });
+    let cur = String(ui === 'en' ? (s.nameEn || s.name || s.title || s.fullTitle || '') : (s.nameVi || s.name || s.title || s.fullTitle || '')).trim();
+    const rawPicked = cur;
+    for (let i = 0; i < prefixes.length; i++) {
+      const escRe = prefixes[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp('^' + escRe + '[\\s:!\\-–—.]*$', 'i').test(cur)) { cur = ''; break; }
+      const leadRe = new RegExp('^' + escRe + '(?:\\s*[:\\-–—!|•]+\\s*|\\s+(?=(?:Movie|Phần|Phan|Season|SS|Mùa|OVA|ONA|Special|SP|Mini|Idol|Shinonome|Chapter|Part|Arc)\\b))', 'i');
+      if (leadRe.test(cur)) { cur = cur.replace(leadRe, '').trim(); break; }
+    }
+    cur = cur.replace(/^[:\-–—•|\s]+/, '').trim();
+    if (!cur || /^tv\s*series$/i.test(cur)) {
+      cur = /^tv\s*series$/i.test(rawPicked) ? 'TV Series' : (hasSeason2 ? (ui === 'en' ? 'Season 1' : 'Phần 1') : 'TV Series');
+    } else if (ui === 'en' && !s.nameEn) {
+      cur = cur.replace(/^Phần\s+(\d+)\b/i, 'Season $1').replace(/^Mùa\s+(\d+)\b/i, 'Season $1');
+    } else if (ui === 'vi' && !s.nameVi) {
+      cur = cur.replace(/^Season\s+(\d+)\b/i, 'Phần $1');
+    }
+    const fullTip = (ui === 'en' ? (s.originName || s.fullTitle || cur) : (s.fullTitle || cur)) + (s.year ? ' (' + s.year + ')' : '');
+    return { label: cur, tooltip: fullTip };
+  }
+
   function tr(vi, en) {
     return state.prefs.uiLang === 'en' ? en : vi;
   }
@@ -537,12 +644,14 @@
     const badge = m.quality || m.episode_current || '';
     const yr = m.year ? m.year + ' / ' : '';
     const fk = (focusPrefix || 'card') + ':' + m.slug;
+    const t = getDisplayTitles(m);
+    const dispTitle = t.primary || m.name || m.slug;
     return '<button class="movie-card tv-focus" data-slug="' + esc(m.slug) + '" data-focus-key="' + esc(fk) + '" tabindex="-1">' +
       '<div class="poster-wrap">' +
-        '<img width="210" height="315" decoding="async" loading="lazy" src="' + esc(primary) + '" data-fallback="' + esc(secondary) + '" alt="' + esc(m.name) + '" />' +
+        '<img width="210" height="315" decoding="async" loading="lazy" src="' + esc(primary) + '" data-fallback="' + esc(secondary) + '" alt="' + esc(dispTitle) + '" />' +
         (badge ? '<span class="poster-badge">' + esc(badge) + '</span>' : '') +
       '</div>' +
-      '<div class="movie-name">' + esc(m.name) + '</div>' +
+      '<div class="movie-name">' + esc(dispTitle) + '</div>' +
       '<div class="movie-meta">' + esc(yr + formatSubBadge(m)) + '</div>' +
     '</button>';
   }
@@ -565,10 +674,11 @@
     }
     const tagEl = heroEl.querySelector('.hero-tag');
     if (tagEl) tagEl.textContent = tr('PHIM MỚI', 'NEW') + ' / ' + (hero.quality || 'HD') + ' / ' + formatSubBadge(hero);
+    const ht = getDisplayTitles(hero);
     const titleEl = heroEl.querySelector('.hero-title');
-    if (titleEl) titleEl.textContent = hero.name || '';
+    if (titleEl) titleEl.textContent = ht.primary || hero.name || '';
     const subEl = heroEl.querySelector('.hero-sub');
-    if (subEl) subEl.textContent = (hero.origin_name || '') + (hero.year ? ' (' + hero.year + ')' : '');
+    if (subEl) subEl.textContent = ht.secondaryWithYear || '';
 
     const playBtn = heroEl.querySelector('[data-play-direct]');
     if (playBtn) playBtn.setAttribute('data-play-direct', hero.slug);
@@ -603,13 +713,14 @@
         const bg = resolveImg(hero.thumb_url || hero.poster_url) || IMG_FALLBACK_SVG;
         const bgFb = resolveImg(hero.poster_url) || '';
         const favActive = isFavorite(hero.slug);
+        const ht = getDisplayTitles(hero);
         html += '<div id="heroCard" class="hero-card">' +
           '<img class="hero-bg" decoding="async" src="' + esc(bg) + '" data-fallback="' + esc(bgFb) + '" alt="" />' +
           '<div class="hero-grad"></div>' +
           '<div class="hero-body">' +
             '<span class="hero-tag">' + tr('PHIM MỚI', 'NEW') + ' / ' + esc(hero.quality || 'HD') + ' / ' + esc(formatSubBadge(hero)) + '</span>' +
-            '<h2 class="hero-title">' + esc(hero.name) + '</h2>' +
-            '<div class="hero-sub">' + esc(hero.origin_name || '') + (hero.year ? ' (' + hero.year + ')' : '') + '</div>' +
+            '<h2 class="hero-title">' + esc(ht.primary || hero.name) + '</h2>' +
+            '<div class="hero-sub">' + esc(ht.secondaryWithYear) + '</div>' +
             '<div class="hero-actions">' +
               '<button class="btn-accent tv-focus" data-play-direct="' + esc(hero.slug) + '" data-focus-key="hero:play" tabindex="-1">' + svgIcon('play', 18) + '<span>Xem ngay</span></button>' +
               '<button class="btn-glass tv-focus" data-open-slug="' + esc(hero.slug) + '" data-focus-key="hero:detail" tabindex="-1">' + svgIcon('info', 18) + '<span>Chi tiết</span></button>' +
@@ -690,6 +801,12 @@
       ]);
       state.detailData = pair[0];
       state.detailFranchise = pair[1].seasons || [];
+      state.detailFranchiseMeta = {
+        baseTitle: pair[1].baseTitle || '',
+        baseTitleVi: pair[1].baseTitleVi || (pair[0].movie && pair[0].movie.vi_name) || '',
+        baseTitleEn: pair[1].baseTitleEn || (pair[0].movie && pair[0].movie.en_name) || '',
+        baseTitleRomaji: pair[1].baseTitleRomaji || (pair[0].movie && pair[0].movie.romaji_name) || ''
+      };
       if (pair[0].movie) {
         setAmbientUrl(resolveImg(pair[0].movie.poster_url || pair[0].movie.thumb_url));
         const gSlug = pair[0].movie.category && pair[0].movie.category[0] ? pair[0].movie.category[0].slug : '';
@@ -730,10 +847,15 @@
     const directors = formatPeopleList(m.director);
     const countries = Array.isArray(m.country) ? m.country.map((c) => c.name).filter(Boolean).join(', ') : '';
 
+    const dt = getDisplayTitles(m);
+    const detailSubParts = [];
+    if (dt.secondary) detailSubParts.push(dt.secondary);
+    if (m.year) detailSubParts.push(String(m.year));
+    if (m.lang || (Array.isArray(m.sub_langs) && m.sub_langs.length)) detailSubParts.push(formatSubBadge(m));
     const leftCol = '<div>' +
       '<div class="detail-poster-wrap"><img src="' + esc(poster) + '" data-fallback="' + esc(posterFb) + '" alt="" /></div>' +
-      '<h2 class="detail-title">' + esc(m.name) + '</h2>' +
-      (m.origin_name ? '<div class="detail-origin">' + esc(m.origin_name) + (m.year ? ' / ' + esc(m.year) : '') + (m.lang ? ' / ' + esc(m.lang) : '') + '</div>' : '') +
+      '<h2 class="detail-title">' + esc(dt.primary || m.name) + '</h2>' +
+      (detailSubParts.length ? '<div class="detail-origin">' + esc(detailSubParts.join(' / ')) + '</div>' : '') +
       '<div class="detail-actions">' +
         '<button class="btn-accent tv-focus" id="btnDetailPlay" data-focus-key="detail:play" tabindex="-1">' + svgIcon('play', 18) + '<span>' + (hist ? 'Xem tiếp: ' + esc(hist.episodeName || 'Tập 1') : 'Xem ngay') + '</span></button>' +
         '<button class="btn-glass tv-focus" id="btnDetailFav" data-focus-key="detail:fav" tabindex="-1">' + svgIcon(isFavorite(m.slug) ? 'check' : 'bookmark', 18) + '<span>' + (isFavorite(m.slug) ? 'Đã lưu' : 'Lưu') + '</span></button>' +
@@ -755,14 +877,22 @@
 
     let franchiseHtml = '';
     if (state.detailFranchise.length > 1) {
+      const fMeta = state.detailFranchiseMeta || {};
+      const fBase = state.prefs.uiLang === 'en'
+        ? (fMeta.baseTitleEn || getDisplayTitles({ name: fMeta.baseTitle, vi_name: fMeta.baseTitleVi, en_name: fMeta.baseTitleEn, romaji_name: fMeta.baseTitleRomaji }).primary || '')
+        : (fMeta.baseTitleVi || getDisplayTitles({ name: fMeta.baseTitle, vi_name: fMeta.baseTitleVi, en_name: fMeta.baseTitleEn, romaji_name: fMeta.baseTitleRomaji }).primary || '');
+      const fHdr = state.prefs.uiLang === 'en'
+        ? (fBase ? 'Franchise: ' + fBase + ' (' + state.detailFranchise.length + ' parts)' : 'Franchise (' + state.detailFranchise.length + ' parts)')
+        : (fBase ? 'Các phần phim: ' + fBase + ' (' + state.detailFranchise.length + ' phần)' : 'Các phần phim (' + state.detailFranchise.length + ')');
       franchiseHtml = '<div class="glass-box">' +
         '<button class="s-row tv-focus" id="btnToggleFranchise" data-focus-key="detail:franchise" tabindex="-1" style="padding:4px 6px">' +
-          '<strong>Các phần phim (' + state.detailFranchise.length + ')</strong>' +
-          '<span style="display:inline-flex;align-items:center;color:var(--accent)">' + (state.franchiseExpanded ? 'Thu gọn ' + svgIcon('chevUp', 16) : 'Mở rộng ' + svgIcon('chevDown', 16)) + '</span>' +
+          '<strong>' + esc(fHdr) + '</strong>' +
+          '<span style="display:inline-flex;align-items:center;color:var(--accent)">' + (state.franchiseExpanded ? tr('Thu gọn ', 'Collapse ') + svgIcon('chevUp', 16) : tr('Mở rộng ', 'Expand ') + svgIcon('chevDown', 16)) + '</span>' +
         '</button>' +
-        (state.franchiseExpanded ? '<div class="franchise-list">' + state.detailFranchise.map((s) =>
-          '<button class="season-chip tv-focus ' + (s.slug === m.slug ? 'active' : '') + '" data-slug="' + esc(s.slug) + '" data-focus-key="season:' + esc(s.slug) + '" tabindex="-1">' + esc(s.fullTitle || s.name || s.slug) + '</button>'
-        ).join('') + '</div>' : '') +
+        (state.franchiseExpanded ? '<div class="franchise-list">' + state.detailFranchise.map((s) => {
+          const fc = formatFranchiseSeasonChip(s, fMeta, state.detailFranchise);
+          return '<button class="season-chip tv-focus ' + (s.slug === m.slug ? 'active' : '') + '" data-slug="' + esc(s.slug) + '" data-focus-key="season:' + esc(s.slug) + '" title="' + esc(fc.tooltip) + '" tabindex="-1">' + esc(fc.label) + '</button>';
+        }).join('') + '</div>' : '') +
       '</div>';
     }
 
@@ -1305,7 +1435,7 @@
       '</div>' +
       '<div class="player-hud-top">' +
         '<div style="min-width:0">' +
-          '<div style="font-weight:800;font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(movie.name) + ' — ' + esc(ep.name) + '</div>' +
+          '<div style="font-weight:800;font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(getDisplayTitles(movie).primary || movie.name) + ' — ' + esc(ep.name) + '</div>' +
           '<div id="playerSourceLbl" style="font-size:15px;color:#a8b0c4;margin-top:3px">Nguồn: Chuẩn (clean-m3u8)</div>' +
         '</div>' +
         '<div class="player-btn-group">' +
