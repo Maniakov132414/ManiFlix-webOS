@@ -1332,7 +1332,7 @@
             '<button class="tb-btn tv-focus" id="btnNextEp" data-focus-key="player:next" tabindex="-1"' + (episodeIndex + 1 >= srv.server_data.length ? ' disabled style="opacity:0.4"' : '') + '>' + svgIcon('next', 18) + '<span>Tập sau</span></button>' +
           '</div>' +
           '<div class="player-btn-group">' +
-            '<button class="tb-btn tv-focus" id="btnPlayerSub" data-focus-key="player:sub" tabindex="-1">Phụ đề: Tự động</button>' +
+            '<button class="tb-btn tv-focus hidden" id="btnPlayerSub" style="display:none" data-focus-key="player:sub" tabindex="-1">Phụ đề: Tự động</button>' +
             '<button class="tb-btn tv-focus" id="btnPlayerQuality" data-focus-key="player:quality" tabindex="-1">Chất lượng: Tự động</button>' +
             '<button class="tb-btn tv-focus" id="btnPlayerSpeed" data-focus-key="player:speed" tabindex="-1">Tốc độ: 1x</button>' +
             '<button class="tb-btn tv-focus" id="btnPlayerAspect" data-focus-key="player:aspect" tabindex="-1">Tỉ lệ: Gốc</button>' +
@@ -1426,6 +1426,46 @@
       }
     }
 
+    function hasEngSubTrack(tracksList) {
+      const list = Array.isArray(tracksList) ? tracksList : [];
+      if (!list.length) return false;
+      if (list.some((t) => /\b(en|eng|english)\b/i.test(String((t && (t.lang || t.language)) || '') + ' ' + String((t && (t.name || t.label)) || '')))) {
+        return true;
+      }
+      const allClassifiedNonEn = list.every((t) => {
+        const combined = String((t && (t.lang || t.language)) || '') + ' ' + String((t && (t.name || t.label)) || '');
+        return /\b(vi|vie|viet|zh|chi|zho|ja|jpn|ko|kor|th|tha|fr|fre|es|spa|de|ger|ru|rus|id|ind|ms|may)\b|tiếng\s*việt|tieng\s*viet/i.test(combined);
+      });
+      if (allClassifiedNonEn) return false;
+      if (movie && Array.isArray(movie.sub_langs) && movie.sub_langs.some((s) => /^en/i.test(String(s || '')))) {
+        return true;
+      }
+      return false;
+    }
+
+    function updateSubButtonVisibility(tracksList) {
+      const btnSub = document.getElementById('btnPlayerSub');
+      if (!btnSub) return false;
+      const show = hasEngSubTrack(tracksList);
+      btnSub.classList.toggle('hidden', !show);
+      btnSub.style.display = show ? 'inline-flex' : 'none';
+      if (!show && document.activeElement === btnSub) {
+        focusByKey('player:quality') || focusByKey('player:play');
+      }
+      return show;
+    }
+
+    function getNativeVideoSubTracks() {
+      const out = [];
+      if (!video || !video.textTracks) return out;
+      for (let i = 0; i < video.textTracks.length; i++) {
+        const tt = video.textTracks[i];
+        if (tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
+        out.push({ tt, lang: tt.language || '', name: tt.label || tt.language || ('Sub ' + (out.length + 1)) });
+      }
+      return out;
+    }
+
     function attachStream(srcUrl, label) {
       const lbl = document.getElementById('playerSourceLbl');
       if (lbl) lbl.textContent = 'Nguồn: ' + label;
@@ -1433,6 +1473,7 @@
       levels = [];
       currentLevel = -1;
       updateQualityButton();
+      updateSubButtonVisibility([]);
 
       if (window.Hls && window.Hls.isSupported()) {
         hls = new window.Hls({
@@ -1448,14 +1489,16 @@
                 hls.on(window.Hls.Events.MANIFEST_PARSED, (_, data) => {
           levels = (data && data.levels) ? data.levels : (hls.levels || []);
           updateQualityButton();
+          updateSubButtonVisibility(hls.subtitleTracks || []);
         });
         hls.on(window.Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
           const tracks = hls.subtitleTracks || [];
           const defSub = (state.prefs.defaultSubLang || 'vi').toLowerCase();
           const btnSub = document.getElementById('btnPlayerSub');
+          const showSubBtn = updateSubButtonVisibility(tracks);
           if (defSub === 'off') {
             hls.subtitleTrack = -1;
-            if (btnSub) btnSub.textContent = tr('Phụ đề: Tắt', 'Sub: Off');
+            if (showSubBtn && btnSub) btnSub.textContent = tr('Phụ đề: Tắt', 'Sub: Off');
             return;
           }
           const re = defSub === 'en' ? /\b(en|eng|english)\b/i : /vi|vie|viet/i;
@@ -1463,7 +1506,7 @@
           if (matchIdx < 0) matchIdx = tracks.findIndex((t) => /vi|vie|viet/i.test((t.lang || '') + ' ' + (t.name || '')));
           if (matchIdx >= 0) hls.subtitleTrack = matchIdx;
           else if (tracks.length > 0 && hls.subtitleTrack < 0) hls.subtitleTrack = 0;
-          if (btnSub && tracks.length > 0) {
+          if (showSubBtn && btnSub && tracks.length > 0) {
             const cur = tracks[hls.subtitleTrack];
             btnSub.textContent = tr('Phụ đề: ', 'Sub: ') + (cur ? (cur.name || cur.lang || 'VI') : tr('Tắt', 'Off'));
           }
@@ -1480,6 +1523,21 @@
         });
       } else {
         video.src = srcUrl;
+        const syncNativeSubs = () => {
+          const nTracks = getNativeVideoSubTracks();
+          const showSubBtn = updateSubButtonVisibility(nTracks);
+          const btnSub = document.getElementById('btnPlayerSub');
+          if (showSubBtn && btnSub) {
+            const act = nTracks.find((x) => x.tt.mode === 'showing');
+            btnSub.textContent = tr('Phụ đề: ', 'Sub: ') + (act ? act.name : tr('Tắt', 'Off'));
+          }
+        };
+        if (video.textTracks && !video.textTracks._mfTvBound) {
+          video.textTracks._mfTvBound = true;
+          video.textTracks.addEventListener('addtrack', syncNativeSubs);
+          video.textTracks.addEventListener('change', syncNativeSubs);
+        }
+        video.addEventListener('loadedmetadata', syncNativeSubs);
       }
     }
 
@@ -1491,6 +1549,7 @@
       .then((r) => {
         markers = r.markers || [];
         renderMarkersOnScrubber();
+        evaluateSkipMarkers(false);
       })
       .catch(() => {});
 
@@ -1586,11 +1645,20 @@
       showHud(true);
     };
     document.getElementById('btnPlayerSub').onclick = () => {
-      if (!hls || !(hls.subtitleTracks && hls.subtitleTracks.length)) {
-        toast(tr('Phim này không có phụ đề rời', 'No soft subtitles available'));
+      if (!hls) {
+        const nTracks = getNativeVideoSubTracks();
+        if (!hasEngSubTrack(nTracks)) return;
+        const curIdx = nTracks.findIndex((x) => x.tt.mode === 'showing');
+        let nextIdx = curIdx + 1;
+        if (nextIdx >= nTracks.length) nextIdx = -1;
+        nTracks.forEach((x, i) => { x.tt.mode = (i === nextIdx) ? 'showing' : 'disabled'; });
+        const lbl = nextIdx >= 0 ? nTracks[nextIdx].name : tr('Tắt', 'Off');
+        document.getElementById('btnPlayerSub').textContent = tr('Phụ đề: ', 'Sub: ') + lbl;
+        showHud(true);
         return;
       }
-      const tracks = hls.subtitleTracks;
+      const tracks = hls.subtitleTracks || [];
+      if (!hasEngSubTrack(tracks)) return;
       let nextIdx = hls.subtitleTrack + 1;
       if (nextIdx >= tracks.length) nextIdx = -1;
       hls.subtitleTrack = nextIdx;
@@ -1637,6 +1705,70 @@
       showHud(true);
     };
 
+    let programmaticSkipUntil = 0;
+    function getMarkerKey(mk, endSec) {
+      return (mk && mk.id) ? String(mk.id) : (((mk && mk.type) || 'skip') + '_' + (mk ? mk.start : 0) + '_' + endSec);
+    }
+
+    function evaluateSkipMarkers(isFromSeek) {
+      const t = video.currentTime || 0;
+      const dur = video.duration || 0;
+      const inProgSkip = Date.now() < programmaticSkipUntil;
+      activeSkipObj = null;
+      for (let i = 0; i < markers.length; i++) {
+        const mk = markers[i];
+        if (!mk || typeof mk.start !== 'number' || typeof mk.end !== 'number') continue;
+        const end = mk.openEnd && dur > mk.start ? dur : mk.end;
+        if (end <= mk.start) continue;
+        const mkId = getMarkerKey(mk, end);
+        const mode = mk.mode || (mk.type === 'ad' ? 'cut' : 'skip');
+        if (mode === 'cut' && state.prefs.autoCutAds && !skippedIds.has(mkId) && t >= mk.start && t < end) {
+          skippedIds.add(mkId);
+          programmaticSkipUntil = Date.now() + 900;
+          video.currentTime = end + 0.1;
+          toast('Đã tự động bỏ qua quảng cáo');
+          return;
+        }
+        if (mode === 'skip' && state.prefs.introSkip !== 'off' && t >= mk.start && t < end) {
+          if (isFromSeek && !inProgSkip) {
+            skippedIds.delete(mkId);
+          }
+          if (!skippedIds.has(mkId)) {
+            if (state.prefs.introSkip === 'auto' && !isFromSeek) {
+              skippedIds.add(mkId);
+              programmaticSkipUntil = Date.now() + 900;
+              video.currentTime = end + 0.1;
+              toast('Đã tự động bỏ qua mở đầu');
+              return;
+            }
+            activeSkipObj = { mk, end, mkId };
+          }
+        }
+      }
+
+      if (activeSkipObj) {
+        const wasHidden = skipBtn.classList.contains('hidden');
+        const lbl = activeSkipObj.mk.type === 'outro'
+          ? 'Bỏ qua kết thúc (OK)'
+          : (activeSkipObj.mk.type === 'recap' ? 'Bỏ qua tóm tắt (OK)' : (activeSkipObj.mk.type === 'intro' ? 'Bỏ qua phần giới thiệu (OK)' : (activeSkipObj.mk.label || 'Bỏ qua mở đầu (OK)')));
+        skipBtn.innerHTML = '<span>' + esc(lbl) + '</span>' + svgIcon('forward', 18);
+        skipBtn.classList.remove('hidden');
+        skipBtn.onclick = () => {
+          if (!activeSkipObj) return;
+          skippedIds.add(activeSkipObj.mkId);
+          programmaticSkipUntil = Date.now() + 900;
+          video.currentTime = activeSkipObj.end + 0.1;
+          skipBtn.classList.add('hidden');
+          activeSkipObj = null;
+        };
+        if (wasHidden && hudHidden) {
+          skipBtn.focus({ preventScroll: true });
+        }
+      } else {
+        skipBtn.classList.add('hidden');
+      }
+    }
+
     video.onloadedmetadata = () => {
       if (!resumeApplied && resumeTime && resumeTime > 5 && (!video.duration || resumeTime < video.duration - 15)) {
         resumeApplied = true;
@@ -1644,16 +1776,22 @@
         toast('Tiếp tục từ ' + formatTime(resumeTime));
       }
       renderMarkersOnScrubber();
+      evaluateSkipMarkers(false);
+    };
+    video.onseeked = () => {
+      evaluateSkipMarkers(true);
     };
     video.onplay = () => {
       const btn = document.getElementById('btnPlayPause');
       if (btn) btn.innerHTML = svgIcon('pause', 18) + '<span>Tạm dừng</span>';
       showHud(true);
+      evaluateSkipMarkers(false);
     };
     video.onpause = () => {
       const btn = document.getElementById('btnPlayPause');
       if (btn) btn.innerHTML = svgIcon('play', 18) + '<span>Phát</span>';
       showHud(false);
+      evaluateSkipMarkers(false);
     };
 
     video.ontimeupdate = () => {
@@ -1671,46 +1809,7 @@
         buf.style.width = Math.min(100, (endBuf / dur) * 100) + '%';
       }
 
-      activeSkipObj = null;
-      for (let i = 0; i < markers.length; i++) {
-        const mk = markers[i];
-        const end = mk.openEnd && dur > mk.start ? dur : mk.end;
-        const mode = mk.mode || (mk.type === 'ad' ? 'cut' : 'skip');
-        if (mode === 'cut' && state.prefs.autoCutAds && !skippedIds.has(mk.id) && t >= mk.start && t < end) {
-          skippedIds.add(mk.id);
-          video.currentTime = end + 0.1;
-          toast('Đã tự động bỏ qua quảng cáo');
-          return;
-        }
-        if (mode === 'skip' && state.prefs.introSkip !== 'off' && t >= mk.start && t < end - 0.5 && !skippedIds.has(mk.id)) {
-          if (state.prefs.introSkip === 'auto') {
-            skippedIds.add(mk.id);
-            video.currentTime = end + 0.1;
-            toast('Đã tự động bỏ qua mở đầu');
-            return;
-          }
-          activeSkipObj = { mk, end };
-        }
-      }
-
-      if (activeSkipObj) {
-        const wasHidden = skipBtn.classList.contains('hidden');
-        const lbl = activeSkipObj.mk.type === 'outro' ? 'Bỏ qua kết thúc (OK)' : (activeSkipObj.mk.label || 'Bỏ qua mở đầu (OK)');
-        skipBtn.innerHTML = '<span>' + esc(lbl) + '</span>' + svgIcon('forward', 18);
-        skipBtn.classList.remove('hidden');
-        skipBtn.onclick = () => {
-          if (!activeSkipObj) return;
-          skippedIds.add(activeSkipObj.mk.id);
-          video.currentTime = activeSkipObj.end + 0.1;
-          skipBtn.classList.add('hidden');
-          activeSkipObj = null;
-        };
-        if (wasHidden && hudHidden) {
-          skipBtn.focus({ preventScroll: true });
-        }
-      } else {
-        skipBtn.classList.add('hidden');
-      }
+      evaluateSkipMarkers(false);
 
       saveProgress(false);
     };
