@@ -4,6 +4,10 @@
   const API_BASE = 'https://phim.maniakov.bond';
   const CF_DOWN = 'https://speed.cloudflare.com/__down';
   const CF_UP = 'https://speed.cloudflare.com/__up';
+  const APP_VERSION = '2.0.2';
+  const APP_PKG_ID = 'bond.maniakov.maniflix';
+  const TV_VERSION_ENDPOINT = '/api/webos/version';
+  const TV_DOWNLOAD_URL = 'https://phim.maniakov.bond/download/webos';
 
   const THEME_PRESETS = [
     { id: 'crimson_violet', name: 'ManiFlix Mặc Định', mode: 'dark', accent: '#e11d48', bg: '#0b0f19', surface: '#0f172a' },
@@ -339,13 +343,96 @@
     }
   }
 
+  const movieDetailCache = new Map();
+  const inflightDetailCache = new Map();
+  let focusPrefetchTimer = null;
+
+  function fetchMovieDetailCached(slug) {
+    const clean = String(slug || '').trim();
+    if (!clean) return Promise.resolve(null);
+    const hit = movieDetailCache.get(clean);
+    if (hit && (Date.now() - hit.ts < 120000)) return Promise.resolve(hit.data);
+    if (inflightDetailCache.has(clean)) return inflightDetailCache.get(clean);
+    const p = api('/api/movie/' + encodeURIComponent(clean)).then((data) => {
+      if (data && data.movie) {
+        if (movieDetailCache.size >= 60) {
+          const oldest = movieDetailCache.keys().next().value;
+          if (oldest) movieDetailCache.delete(oldest);
+        }
+        movieDetailCache.set(clean, { ts: Date.now(), data });
+      }
+      return data;
+    }).finally(() => {
+      inflightDetailCache.delete(clean);
+    });
+    inflightDetailCache.set(clean, p);
+    return p;
+  }
+
+  function scheduleFocusPrefetch(el) {
+    clearTimeout(focusPrefetchTimer);
+    if (!el || !el.dataset) return;
+    const slug = el.dataset.slug || el.dataset.openSlug;
+    if (!slug) return;
+    focusPrefetchTimer = setTimeout(() => {
+      fetchMovieDetailCached(slug).catch(() => {});
+    }, 160);
+  }
+
+  function applyDiscoverPayload(data) {
+    state.heroMovies = data.heroMovies || [];
+    state.discoverPage = 1;
+    state.seriesMovies = data.seriesMovies || [];
+    state.singleMovies = data.singleMovies || [];
+    state.animeMovies = data.animeMovies || [];
+    if (state.token) {
+      if (data.user) {
+        state.user = data.user;
+        if (state.user.themeConfig) {
+          const tc = state.user.themeConfig;
+          if (tc.accent) state.prefs.accent = tc.accent;
+          if (tc.bg) state.prefs.bg = tc.bg;
+          if (tc.surface) state.prefs.surface = tc.surface;
+          if (tc.presetId) state.prefs.presetId = tc.presetId;
+          savePrefs();
+        }
+        if (Array.isArray(data.history)) {
+          state.history = data.history;
+          localStorage.setItem('mf.history', JSON.stringify(state.history));
+        }
+        if (Array.isArray(data.favorites)) state.favorites = data.favorites;
+      } else if (data.user === null) {
+        state.token = '';
+        state.user = null;
+        localStorage.removeItem('mf.token');
+      }
+      updateAccountUI();
+    }
+    if (state.heroMovies[0]) {
+      setAmbientUrl(resolveImg(state.heroMovies[0].poster_url || state.heroMovies[0].thumb_url));
+    }
+    render();
+    focusByKey('hero:play') || focusFirstInMain();
+  }
+
   async function loadDiscover() {
     try {
-      const res = await Promise.all([
-        api('/api/movies?page=1'),
-        api('/api/category?type=phim-bo&page=1').catch(() => ({ items: [] })),
-        api('/api/category?type=phim-le&page=1').catch(() => ({ items: [] })),
-        api('/api/category?type=hoat-hinh&page=1').catch(() => ({ items: [] }))
+      const boot = await api('/api/bootstrap/discover');
+      if (boot && boot.status && Array.isArray(boot.heroMovies)) {
+        applyDiscoverPayload(boot);
+        return;
+      }
+    } catch (e) {}
+
+    try {
+      const [res] = await Promise.all([
+        Promise.all([
+          api('/api/movies?page=1'),
+          api('/api/category?type=phim-bo&page=1').catch(() => ({ items: [] })),
+          api('/api/category?type=phim-le&page=1').catch(() => ({ items: [] })),
+          api('/api/category?type=hoat-hinh&page=1').catch(() => ({ items: [] }))
+        ]),
+        bootstrapAuth().catch(() => {})
       ]);
       state.heroMovies = res[0].items || [];
       state.discoverPage = 1;
@@ -447,7 +534,7 @@
   async function playMovieDirect(slug) {
     try {
       toast('Đang chuẩn bị phát...');
-      const res = await api('/api/movie/' + encodeURIComponent(slug));
+      const res = await fetchMovieDetailCached(slug);
       if (!res || !res.movie) {
         openDetail(slug);
         return;
@@ -849,7 +936,7 @@
     render();
     try {
       const pair = await Promise.all([
-        api('/api/movie/' + encodeURIComponent(slug)),
+        fetchMovieDetailCached(slug),
         api('/api/franchise?slug=' + encodeURIComponent(slug)).catch(() => ({ seasons: [] }))
       ]);
       state.detailData = pair[0];
@@ -1387,7 +1474,11 @@
       '<div class="settings-section">' +
         '<div class="settings-label">Ứng dụng</div>' +
         '<div class="settings-card">' +
-          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">2.0.0 (bond.maniakov.maniflix)</span></div>' +
+          '<div class="s-row" style="cursor:default"><span>Phiên bản</span><span class="s-sub">v' + APP_VERSION + ' (' + APP_PKG_ID + ')</span></div>' +
+          '<button class="s-row tv-focus" id="btnCheckTvUpdates" data-focus-key="set:update" tabindex="-1">' +
+            '<div><div style="font-weight:700">Kiểm tra cập nhật</div><div class="s-sub">Kiểm tra phiên bản mới nhất cho LG webOS TV</div></div>' +
+            '<span style="color:var(--accent);font-weight:700">Kiểm tra</span>' +
+          '</button>' +
           '<button class="s-row tv-focus" id="btnResetPrefs" data-focus-key="set:reset" tabindex="-1">' +
             '<span style="color:#ff453a;font-weight:700">Đặt lại cài đặt mặc định</span>' +
           '</button>' +
@@ -1783,6 +1874,7 @@
     function closePlayer() {
       clearTimeout(hudTimer);
       clearTimeout(osdTimer);
+      window.removeEventListener('mouseup', finishTvScrub);
       saveProgress(true);
       if (hls) { hls.destroy(); hls = null; }
       video.pause();
@@ -1878,14 +1970,64 @@
     document.getElementById('btnFailover').onclick = () => {
       const lbl = document.getElementById('playerSourceLbl');
       const isClean = lbl && lbl.textContent.indexOf('Chuẩn') !== -1;
-      const isVs = rawUrl.indexOf('#vsmov.m3u8') !== -1; const fbUrl = isVs ? (cleanUrl + '&ap=1') : rawUrl; attachStream(isClean ? fbUrl : cleanUrl, isClean ? (isVs ? 'Dự phòng (proxy)' : 'Dự phòng (gốc)') : 'Chuẩn (clean-m3u8)');
+      const isVs = rawUrl.indexOf('/api/hls-master/') !== -1 || rawUrl.indexOf('/api/raw-hls/') !== -1; const fbUrl = isVs ? (cleanUrl + '&ap=1') : rawUrl; attachStream(isClean ? fbUrl : cleanUrl, isClean ? (isVs ? 'Dự phòng (proxy)' : 'Dự phòng (gốc)') : 'Chuẩn (clean-m3u8)');
       showHud(true);
     };
-    document.getElementById('playerScrubber').onclick = (e) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+    const scrubberEl = document.getElementById('playerScrubber');
+    let tvScrubDragging = false;
+    let tvScrubTargetSec = 0;
+    let tvScrubCommitUntil = 0;
+    const applyTvScrubVisual = (sec, dur) => {
+      const fill = document.getElementById('scrubFill');
+      const lblCur = document.getElementById('lblCurTime');
+      if (fill && dur > 0) fill.style.width = Math.min(100, Math.max(0, (sec / dur) * 100)) + '%';
+      if (lblCur) lblCur.textContent = formatTime(sec);
+    };
+    const getTvScrubSec = (clientX) => {
+      const rect = scrubberEl.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+      return ratio * (video.duration || 0);
+    };
+    scrubberEl.onmousedown = (e) => {
+      if (e.button !== 0 || !video.duration) return;
+      e.preventDefault();
+      tvScrubDragging = true;
+      tvScrubTargetSec = getTvScrubSec(e.clientX);
+      applyTvScrubVisual(tvScrubTargetSec, video.duration);
+      showHud(false);
+    };
+    overlay.addEventListener('mousemove', (e) => {
+      if (!tvScrubDragging || !video.duration) return;
+      tvScrubTargetSec = getTvScrubSec(e.clientX);
+      applyTvScrubVisual(tvScrubTargetSec, video.duration);
+    });
+    const finishTvScrub = (e) => {
+      if (!tvScrubDragging) return;
+      tvScrubDragging = false;
+      if (e && typeof e.clientX === 'number' && video.duration) {
+        tvScrubTargetSec = getTvScrubSec(e.clientX);
+      }
       if (video.duration) {
-        const target = ratio * video.duration;
+        tvScrubCommitUntil = Date.now() + 1000;
+        applyTvScrubVisual(tvScrubTargetSec, video.duration);
+        if (hls) { try { hls.startLoad(tvScrubTargetSec); } catch (err) {} }
+        video.currentTime = tvScrubTargetSec;
+        evaluateSkipMarkers(true);
+      }
+      showHud(true);
+    };
+    window.addEventListener('mouseup', finishTvScrub);
+    scrubberEl.onclick = (e) => {
+      if (!e || e.detail === 0 || (e.clientX === 0 && e.clientY === 0)) {
+        togglePlayPause();
+        return;
+      }
+      if (Date.now() < tvScrubCommitUntil) return;
+      if (video.duration) {
+        const target = getTvScrubSec(e.clientX);
+        tvScrubTargetSec = target;
+        tvScrubCommitUntil = Date.now() + 1000;
+        applyTvScrubVisual(target, video.duration);
         if (hls) { try { hls.startLoad(target); } catch (err) {} }
         video.currentTime = target;
         evaluateSkipMarkers(true);
@@ -1985,6 +2127,11 @@
     video.ontimeupdate = () => {
       const t = video.currentTime || 0;
       const dur = video.duration || 0;
+      if (tvScrubDragging || (Date.now() < tvScrubCommitUntil && (video.seeking || Math.abs(t - tvScrubTargetSec) > 1.5))) {
+        applyTvScrubVisual(tvScrubTargetSec, dur);
+        return;
+      }
+      tvScrubCommitUntil = 0;
       const lblCur = document.getElementById('lblCurTime');
       const lblDur = document.getElementById('lblDurTime');
       const fill = document.getElementById('scrubFill');
@@ -2034,6 +2181,97 @@
 
     showHud(true);
     focusByKey('player:play');
+  }
+
+  function compareSemver(a, b) {
+    const pa = String(a || '0').split('.').map((x) => parseInt(x, 10) || 0);
+    const pb = String(b || '0').split('.').map((x) => parseInt(x, 10) || 0);
+    const n = Math.max(pa.length, pb.length);
+    for (let i = 0; i < n; i++) {
+      const va = pa[i] || 0;
+      const vb = pb[i] || 0;
+      if (va !== vb) return va > vb ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function openTvUpdateModal(cfg, isForce) {
+    const root = document.getElementById('modalRoot');
+    if (!root) return;
+    const dlUrl = (cfg && cfg.downloadUrl) ? cfg.downloadUrl : TV_DOWNLOAD_URL;
+    const shortUrl = TV_DOWNLOAD_URL.replace(/^https?:\/\//i, '');
+    const qrSrc = 'https://api.qrserver.com/v1/create-qr-code/?size=164x164&margin=6&data=' + encodeURIComponent(TV_DOWNLOAD_URL);
+    const verLbl = String((cfg && cfg.latestVersion) || APP_VERSION);
+    const notes = String((cfg && cfg.releaseNotes) || 'Cải thiện tốc độ tải phim, sửa phím OK trên thanh tiến trình và nâng cao độ ổn định.');
+    const title = String((cfg && cfg.title) || ('ManiFlix LG webOS TV v' + verLbl));
+
+    root.innerHTML = '<div class="modal-backdrop" id="tvUpdateBackdrop" data-force="' + (isForce ? '1' : '0') + '">' +
+      '<div class="modal-card" style="max-width:680px;background:linear-gradient(155deg, rgba(22,28,46,0.96), rgba(11,15,25,0.98));border:2px solid rgba(255,255,255,0.22);box-shadow:0 24px 64px rgba(0,0,0,0.72)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">' +
+          '<div style="display:flex;align-items:center;gap:12px">' +
+            '<span style="padding:4px 11px;border-radius:999px;font-size:13px;font-weight:800;background:' + (isForce ? '#ff3b30' : 'var(--accent)') + ';color:#fff">' + (isForce ? 'CẬP NHẬT BẮT BUỘC' : 'BẢN CẬP NHẬT MỚI') + '</span>' +
+            '<strong style="font-size:22px">' + esc(title) + '</strong>' +
+          '</div>' +
+          (!isForce ? '<button class="tb-btn tv-focus" id="btnCloseTvUpdate" data-focus-key="tvupd:close" tabindex="-1" style="margin:0">' + svgIcon('close', 18) + '</button>' : '') +
+        '</div>' +
+        '<div style="display:flex;gap:20px;align-items:center;margin-bottom:18px">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px">Phiên bản hiện tại: <strong>v' + esc(APP_VERSION) + '</strong> &rarr; Mới nhất: <strong style="color:#30d158">v' + esc(verLbl) + '</strong></div>' +
+            '<div style="font-size:15px;line-height:1.55;color:var(--text-primary);padding:14px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);margin-bottom:12px">' + esc(notes) + '</div>' +
+            '<div style="font-size:14px;color:var(--text-secondary)">Quét mã QR hoặc truy cập <strong style="color:var(--text-primary)">' + esc(shortUrl) + '</strong> để tải gói .ipk mới nhất.</div>' +
+          '</div>' +
+          '<div style="flex-shrink:0;padding:10px;border-radius:16px;background:#ffffff;display:flex;flex-direction:column;align-items:center">' +
+            '<img src="' + esc(qrSrc) + '" width="148" height="148" alt="QR" style="display:block;border-radius:8px" onerror="this.style.display=\'none\'" />' +
+            '<div style="font-size:11px;font-weight:800;color:#0b0f19;margin-top:6px">v' + esc(verLbl) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:12px;justify-content:flex-end">' +
+          (!isForce ? '<button class="btn-glass tv-focus" id="btnSnoozeTvUpdate" data-focus-key="tvupd:snooze" tabindex="-1">Nhắc lại sau 24 giờ</button>' : '') +
+          '<a href="' + esc(dlUrl) + '" target="_blank" rel="noopener" class="btn-accent tv-focus" id="btnDownloadTvUpdate" data-focus-key="tvupd:dl" tabindex="-1" style="text-decoration:none">' + svgIcon('cloudUp', 18) + '<span>Tải bản cập nhật v' + esc(verLbl) + '</span></a>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    const closeModal = () => {
+      if (isForce) return;
+      root.innerHTML = '';
+      focusByKey(state.lastFocusKey) || focusFirstInMain();
+    };
+    const btnClose = document.getElementById('btnCloseTvUpdate');
+    if (btnClose) btnClose.onclick = closeModal;
+    const btnSnooze = document.getElementById('btnSnoozeTvUpdate');
+    if (btnSnooze) btnSnooze.onclick = () => {
+      try { localStorage.setItem('mf.tv.updateSnoozeUntil', String(Date.now() + 24 * 3600 * 1000)); } catch (e) {}
+      closeModal();
+      toast('Sẽ nhắc cập nhật lại sau 24 giờ');
+    };
+    const bd = document.getElementById('tvUpdateBackdrop');
+    if (bd) bd.onclick = (e) => { if (e.target === bd && !isForce) closeModal(); };
+    focusByKey('tvupd:dl');
+  }
+
+  async function checkTvForUpdates(manual) {
+    try {
+      const cfg = await api(TV_VERSION_ENDPOINT);
+      if (!cfg || !cfg.latestVersion) {
+        if (manual) toast('Không kiểm tra được phiên bản mới');
+        return;
+      }
+      const latest = String(cfg.latestVersion).trim();
+      const minReq = String(cfg.minRequiredVersion || '1.0.0').trim();
+      const isForce = cfg.mode === 'force' || cfg.forceUpdate === true || compareSemver(APP_VERSION, minReq) < 0;
+      if (compareSemver(APP_VERSION, latest) >= 0) {
+        if (manual) toast('Bạn đang dùng phiên bản mới nhất (v' + APP_VERSION + ')');
+        return;
+      }
+      if (!manual && !isForce) {
+        const snoozeUntil = parseInt(localStorage.getItem('mf.tv.updateSnoozeUntil') || '0', 10) || 0;
+        if (Date.now() < snoozeUntil) return;
+      }
+      openTvUpdateModal(cfg, isForce);
+    } catch (e) {
+      if (manual) toast('Lỗi kiểm tra cập nhật: ' + e.message);
+    }
   }
 
   function openAuthModal() {
@@ -2373,6 +2611,8 @@
 
     const btnSpeed = document.getElementById('btnRunSpeedtest');
     if (btnSpeed) btnSpeed.onclick = runTvSpeedtest;
+    const btnCheckUpd = document.getElementById('btnCheckTvUpdates');
+    if (btnCheckUpd) btnCheckUpd.onclick = () => checkTvForUpdates(true);
   }
 
   function switchTab(tab) {
@@ -2396,6 +2636,11 @@
   function navigateBack() {
     const modal = document.getElementById('modalRoot');
     if (modal && modal.innerHTML.trim() !== '') {
+      const updBd = document.getElementById('tvUpdateBackdrop');
+      if (updBd && updBd.getAttribute('data-force') === '1') {
+        toast('Vui lòng cập nhật phiên bản mới để tiếp tục');
+        return;
+      }
       modal.innerHTML = '';
       focusByKey(state.lastFocusKey) || focusFirstInMain();
       return;
@@ -2480,6 +2725,7 @@
     if (el.dataset && el.dataset.focusKey) {
       state.lastFocusKey = el.dataset.focusKey;
     }
+    scheduleFocusPrefetch(el);
     // Zero-reflow horizontal centering for rails/chips using offsetLeft
     const rail = el.closest('.rail, .chips-row');
     if (rail) {
@@ -2771,6 +3017,7 @@
           if (active && active.id === 'playerScrubber') {
             if (code === 37) { e.preventDefault(); state.player.seekBy(-15); return; }
             if (code === 39) { e.preventDefault(); state.player.seekBy(15); return; }
+            if (code === 13) { e.preventDefault(); state.player.togglePlayPause(); return; }
           }
         }
       }
@@ -2803,6 +3050,11 @@
     // OK / Enter (13)
     if (code === 13) {
       if (isInput) return;
+      if (active && active.id === 'playerScrubber' && state.player) {
+        e.preventDefault();
+        state.player.togglePlayPause();
+        return;
+      }
       if (active && active.classList.contains('tv-focus')) {
         e.preventDefault();
         active.click();
@@ -2831,9 +3083,11 @@
   }, 8000);
 
   applyTheme();
-  bootstrapAuth();
+  if (!state.token) updateAccountUI();
   loadDiscover();
   if (!state.prefs.langOnboarded) {
     setTimeout(() => openTvLanguageModal(true), 200);
+  } else {
+    setTimeout(() => checkTvForUpdates(false), 1800);
   }
 })();

@@ -506,6 +506,8 @@ body:not(.dpad-mode) .movie-card.tv-focus:hover .poster-wrap {
   text-align: left;
   color: var(--text-primary);
   contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 210px 340px;
 }
 
 /* 2:3 ratio compatible with all Chromium versions */
@@ -681,6 +683,8 @@ body:not(.dpad-mode) .movie-card.tv-focus:hover .poster-wrap {
   font-weight: 700;
   cursor: pointer;
   contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 112px 50px;
 }
 .ep-btn.active {
   border-color: var(--accent);
